@@ -1,0 +1,21 @@
+# macOS metadata
+.DS_Store
+._*
+
+# Draw.io temporary and backup files
+.$*.bkp
+
+# Python environments
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# PlatformIO and compiled output
+.pio/
+build/
+dist/
+
+# Editor-specific files
+.vscode/
+.idea/
