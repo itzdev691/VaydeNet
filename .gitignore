@@ -15,6 +15,14 @@ __pycache__/
 .pio/
 build/
 dist/
+compile_commands.json
+.cache/
+
+# Local nRF24 prototype build configuration
+/apps/examples/nrf24l01/*/platformio.ini
+
+# Obsolete scaffold placeholder
+/packages/VaydeEngine/include/VaydeNet/.gitkeep
 
 # Editor-specific files
 .vscode/
