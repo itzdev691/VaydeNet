@@ -15,7 +15,13 @@ __pycache__/
 .pio/
 build/
 dist/
+compile_commands.json
+.cache/
 
 # Editor-specific files
 .vscode/
 .idea/
+
+# Portable Xtensa indexing settings for the WT32 Ethernet example
+!/apps/examples/wt32-eth01/ethernet-smoke/.vscode/
+!/apps/examples/wt32-eth01/ethernet-smoke/.vscode/settings.json

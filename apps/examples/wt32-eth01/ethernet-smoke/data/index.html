@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#08110f">
+    <title>VaydeNet Ethernet Monitor</title>
+    <link rel="stylesheet" href="/styles.css">
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="VaydeNet dashboard home">
+          <span class="brand-mark" aria-hidden="true">V</span>
+          <span>
+            <strong>VaydeNet</strong>
+            <small>WT32-ETH01 monitor</small>
+          </span>
+        </a>
+        <div class="connection" id="connection" data-state="loading">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span id="connection-label">Connecting</span>
+        </div>
+      </header>
+
+      <main>
+        <section class="hero" aria-labelledby="page-title">
+          <div>
+            <p class="eyebrow">Ethernet broadcast smoke test</p>
+            <h1 id="page-title">Live Ethernet status</h1>
+            <p class="hero-copy">
+              Current LAN configuration and raw VaydeNet transmission counters,
+              reported directly by the board.
+            </p>
+          </div>
+          <div class="hero-address">
+            <span>Dashboard address</span>
+            <strong id="dashboard-address">Waiting for DHCP</strong>
+            <small id="last-updated">No status received</small>
+          </div>
+        </section>
+
+        <section class="metric-grid" aria-label="Primary status">
+          <article class="metric-card accent-card">
+            <span class="metric-label">Ethernet link</span>
+            <strong class="metric-value" id="link-state">--</strong>
+            <span class="metric-detail" id="link-mode">Awaiting interface</span>
+          </article>
+          <article class="metric-card">
+            <span class="metric-label">IPv4 address</span>
+            <strong class="metric-value mono" id="ipv4">--</strong>
+            <span class="metric-detail" id="hostname">--</span>
+          </article>
+          <article class="metric-card">
+            <span class="metric-label">Driver accepted</span>
+            <strong class="metric-value" id="tx-accepted">0</strong>
+            <span class="metric-detail" id="tx-attempts">0 attempts</span>
+          </article>
+          <article class="metric-card">
+            <span class="metric-label">Driver rejected</span>
+            <strong class="metric-value" id="tx-rejected">0</strong>
+            <span class="metric-detail mono" id="last-result">ESP_OK (0)</span>
+          </article>
+        </section>
+
+        <div class="detail-grid">
+          <section class="panel" aria-labelledby="network-heading">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Link and DHCP values</p>
+                <h2 id="network-heading">Network configuration</h2>
+              </div>
+              <span class="panel-tag" id="dhcp-state">DHCP waiting</span>
+            </div>
+            <dl class="data-list">
+              <div><dt>MAC address</dt><dd class="mono" id="mac">--</dd></div>
+              <div><dt>Subnet mask</dt><dd class="mono" id="subnet">--</dd></div>
+              <div><dt>Gateway</dt><dd class="mono" id="gateway">--</dd></div>
+              <div><dt>DNS server</dt><dd class="mono" id="dns">--</dd></div>
+              <div><dt>Link-up events</dt><dd id="link-up-events">0</dd></div>
+              <div><dt>Link-down events</dt><dd id="link-down-events">0</dd></div>
+            </dl>
+          </section>
+
+          <section class="panel" aria-labelledby="broadcast-heading">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Layer 2 output</p>
+                <h2 id="broadcast-heading">VaydeNet broadcast</h2>
+              </div>
+              <span class="panel-tag mono" id="ether-type">0x88B5</span>
+            </div>
+            <dl class="data-list">
+              <div><dt>Destination</dt><dd class="mono" id="destination">--</dd></div>
+              <div><dt>Sequence</dt><dd id="sequence">0</dd></div>
+              <div><dt>Packet size</dt><dd id="packet-size">220 bytes</dd></div>
+              <div><dt>Frame size</dt><dd id="frame-size">234 bytes</dd></div>
+              <div><dt>Accepted data</dt><dd id="accepted-bytes">0 B</dd></div>
+              <div><dt>Transmit interval</dt><dd id="interval">1 second</dd></div>
+            </dl>
+          </section>
+        </div>
+
+        <aside class="notice">
+          <strong>Driver acceptance is local.</strong>
+          <span>
+            It confirms that the ESP32 Ethernet driver accepted the frame. It
+            does not confirm reception by the switch, router, or another host.
+          </span>
+        </aside>
+      </main>
+
+      <footer>
+        <span>VaydeNet isolated Ethernet example</span>
+        <span id="uptime">Uptime --</span>
+      </footer>
+    </div>
+  </body>
+</html>
