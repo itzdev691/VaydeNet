@@ -15,7 +15,9 @@ __pycache__/
 .pio/
 build/
 dist/
+compile_commands.json
 
 # Editor-specific files
 .vscode/
 .idea/
+.cache/

@@ -82,6 +82,8 @@ VaydeNet decides **how** the communication happens.
 
 VaydeNet is currently under active development and the architecture is evolving.
 
+See [DEVELOPMENT_STATUS.md](DEVELOPMENT_STATUS.md) for the implemented capability boundary, active scaffolds, experiments, and planned milestones.
+
 ## License
 
 License information will be added when the project reaches its first public release.
