@@ -5,12 +5,14 @@
 #include <WebServer.h>
 
 class EthernetNetwork;
+class PortMonitor;
 class VaydeBroadcaster;
 
 class WebDashboard final {
 public:
     WebDashboard(
         EthernetNetwork &network,
+        const PortMonitor &portMonitor,
         const VaydeBroadcaster &broadcaster);
 
     bool begin();
@@ -23,6 +25,7 @@ private:
     void sendNotFound();
 
     EthernetNetwork &network_;
+    const PortMonitor &portMonitor_;
     const VaydeBroadcaster &broadcaster_;
     WebServer server_;
     bool filesystemReady_ = false;

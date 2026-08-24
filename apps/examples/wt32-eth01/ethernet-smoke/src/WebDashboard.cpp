@@ -9,6 +9,7 @@
 
 #include "AppConfig.h"
 #include "EthernetNetwork.h"
+#include "PortMonitor.h"
 #include "VaydeBroadcaster.h"
 
 namespace {
@@ -46,8 +47,10 @@ void appendBoolean(String &json, bool value) {
 
 WebDashboard::WebDashboard(
     EthernetNetwork &network,
+    const PortMonitor &portMonitor,
     const VaydeBroadcaster &broadcaster)
     : network_(network),
+      portMonitor_(portMonitor),
       broadcaster_(broadcaster),
       server_(AppConfig::kDashboardPort) {
 }
@@ -145,10 +148,11 @@ void WebDashboard::serveAsset(const char *path, const char *contentType) {
 
 void WebDashboard::sendStatus() {
     const EthernetNetwork::Snapshot network = network_.snapshot();
-    const VaydeBroadcaster::Snapshot broadcast = broadcaster_.snapshot();
+    const PortMonitor::Snapshot ports = portMonitor_.snapshot();
+    const VaydeBroadcaster::Snapshot espNow = broadcaster_.snapshot();
 
     String json;
-    json.reserve(900);
+    json.reserve(1400);
 
     json += F("{\"device\":{");
     json += F("\"hostname\":\"");
@@ -186,26 +190,70 @@ void WebDashboard::sendStatus() {
     json += F(",\"linkDownEvents\":");
     appendUnsigned(json, network.linkDownEvents);
 
-    json += F("},\"broadcast\":{");
-    json += F("\"destination\":\"FF:FF:FF:FF:FF:FF\",");
-    json += F("\"etherType\":\"0x88B5\",");
-    json += F("\"packetBytes\":220,\"frameBytes\":234,\"intervalMs\":");
+    json += F("},\"portProbes\":{");
+    json += F("\"targetAvailable\":");
+    appendBoolean(json, ports.targetAvailable);
+    json += F(",\"target\":\"");
+    json += ports.targetAvailable ? ports.target.toString() : String("--");
+    json += F("\",\"probeIntervalMs\":");
+    appendUnsigned(json, AppConfig::kPortProbeIntervalMs);
+    json += F(",\"completedSweeps\":");
+    appendUnsigned(json, ports.completedSweeps);
+    json += F(",\"ports\":[");
+    for (size_t index = 0; index < ports.results.size(); ++index) {
+        const PortMonitor::Result &result = ports.results[index];
+        if (index != 0) {
+            json += ',';
+        }
+        json += F("{\"port\":");
+        appendUnsigned(json, result.port);
+        json += F(",\"tested\":");
+        appendBoolean(json, result.tested);
+        json += F(",\"open\":");
+        appendBoolean(json, result.open);
+        json += F(",\"latencyMs\":");
+        appendUnsigned(json, result.latencyMs);
+        json += F(",\"lastCheckedMs\":");
+        appendUnsigned(json, result.lastCheckedMs);
+        json += '}';
+    }
+    json += ']';
+
+    json += F("},\"espNow\":{");
+    json += F("\"ready\":");
+    appendBoolean(json, espNow.ready);
+    json += F(",\"destination\":\"FF:FF:FF:FF:FF:FF\",");
+    json += F("\"stationMac\":\"");
+    json += formatMacAddress(espNow.stationMac);
+    json += F("\",\"channel\":");
+    appendUnsigned(json, espNow.channel);
+    json += F(",\"packetBytes\":220,\"intervalMs\":");
     appendUnsigned(json, AppConfig::kTransmitIntervalMs);
     json += F(",\"sequenceNumber\":");
-    appendUnsigned(json, broadcast.sequenceNumber);
+    appendUnsigned(json, espNow.sequenceNumber);
     json += F(",\"attempts\":");
-    appendUnsigned(json, broadcast.attempts);
-    json += F(",\"driverAccepted\":");
-    appendUnsigned(json, broadcast.driverAccepted);
-    json += F(",\"driverRejected\":");
-    appendUnsigned(json, broadcast.driverRejected);
-    json += F(",\"acceptedBytes\":");
-    appendUnsigned(json, broadcast.frameBytesAccepted);
-    json += F(",\"lastResult\":\"");
-    json += esp_err_to_name(broadcast.lastResult);
-    json += F("\",\"lastResultCode\":");
-    json += static_cast<int>(broadcast.lastResult);
-    json += F("}}}");
+    appendUnsigned(json, espNow.attempts);
+    json += F(",\"queueAccepted\":");
+    appendUnsigned(json, espNow.queueAccepted);
+    json += F(",\"queueRejected\":");
+    appendUnsigned(json, espNow.queueRejected);
+    json += F(",\"deliverySucceeded\":");
+    appendUnsigned(json, espNow.deliverySucceeded);
+    json += F(",\"deliveryFailed\":");
+    appendUnsigned(json, espNow.deliveryFailed);
+    json += F(",\"queuedBytes\":");
+    appendUnsigned(json, espNow.packetBytesQueued);
+    json += F(",\"lastQueueResult\":\"");
+    json += esp_err_to_name(espNow.lastQueueResult);
+    json += F("\",\"lastQueueResultCode\":");
+    json += static_cast<int>(espNow.lastQueueResult);
+    json += F(",\"lastDelivery\":\"");
+    json += espNow.deliveryStatusAvailable
+        ? (espNow.lastDeliveryStatus == ESP_NOW_SEND_SUCCESS
+            ? F("success")
+            : F("failed"))
+        : F("pending");
+    json += F("\"}}");
 
     server_.sendHeader("Cache-Control", "no-store");
     server_.send(200, "application/json; charset=utf-8", json);

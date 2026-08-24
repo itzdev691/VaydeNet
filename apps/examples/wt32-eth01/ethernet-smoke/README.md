@@ -1,20 +1,44 @@
-# WT32-ETH01 Ethernet broadcast smoke test
+# WT32-ETH01 Ethernet telemetry and ESP-NOW sender
 
-This isolated PlatformIO example initializes the WT32-ETH01 LAN8720 Ethernet
-interface, obtains a DHCP lease, sends the canonical 220-byte VaydeNet `Packet`
-inside a raw Ethernet II broadcast frame once per second, and hosts a local HTTP
-status dashboard.
+This isolated PlatformIO example uses the WT32-ETH01 LAN8720 interface for
+Ethernet status and the local HTTP dashboard. It sends the canonical 220-byte
+VaydeNet `Packet` directly over ESP-NOW once per second for the existing
+VaydeESP receiver.
 
-It does not modify VaydeEngine or define new VaydeNet packet semantics.
-It does not probe application server ports yet.
+The receiver packet layout is unchanged. The previous raw Ethernet II
+broadcast path and experimental EtherType `0x88B5` are no longer used.
+
+## Data flow
+
+```text
+LAN8720 Ethernet status
+        |
+        +--> DHCP gateway TCP probes
+        |          |
+        |          +--> LittleFS dashboard and /api/status
+        |          +--> compact packet telemetry
+        |
+        +--> Ethernet link telemetry
+                  |
+                  v
+          220-byte VaydeNet Packet
+                  |
+                  v
+          ESP-NOW broadcast on channel 1
+                  |
+                  v
+          VaydeESP receiver display
+```
+
+The current telemetry payload reports the WT32 Ethernet link state, DHCP state,
+IPv4 address, gateway, negotiated speed, duplex mode, and the latest gateway
+TCP-probe results. It does not query router-internal statistics such as WAN
+usage, client lists, CPU load, or temperature.
 
 ## Project structure
 
 ```text
 ethernet-smoke/
-├── .clangd
-├── .vscode/
-│   └── settings.json
 ├── data/
 │   ├── app.js
 │   ├── index.html
@@ -22,10 +46,12 @@ ethernet-smoke/
 ├── include/
 │   ├── AppConfig.h
 │   ├── EthernetNetwork.h
+│   ├── PortMonitor.h
 │   ├── VaydeBroadcaster.h
 │   └── WebDashboard.h
 ├── src/
 │   ├── EthernetNetwork.cpp
+│   ├── PortMonitor.cpp
 │   ├── VaydeBroadcaster.cpp
 │   ├── WebDashboard.cpp
 │   └── main.cpp
@@ -33,40 +59,49 @@ ethernet-smoke/
 └── README.md
 ```
 
-- `main.cpp` owns only Arduino startup and periodic scheduling.
-- `EthernetNetwork` owns LAN8720 events, DHCP state, MAC access, and network
-  diagnostics.
-- `VaydeBroadcaster` owns the VaydeNet packet, Ethernet frame construction,
-  transmission, and transmit statistics.
-- `WebDashboard` owns the HTTP routes, LittleFS asset serving, and live JSON
-  status endpoint.
-- `data/` contains the independent HTML, CSS, and JavaScript files packed into
-  the LittleFS image.
-- `AppConfig` owns example constants and timing values.
-- `.clangd` and `.vscode/settings.json` make editor diagnostics use the Xtensa
-  compilation database instead of parsing ESP32 code as macOS code.
+- `EthernetNetwork` owns LAN8720 link, DHCP, addressing, and link diagnostics.
+- `PortMonitor` probes one configured TCP port every two seconds against the
+  DHCP gateway and retains the latest result for each port.
+- `VaydeBroadcaster` owns Wi-Fi station mode, ESP-NOW channel and peer setup,
+  packet construction, transmission, and sender-side statistics.
+- `WebDashboard` serves the LittleFS assets and live Ethernet, TCP-probe, and
+  ESP-NOW status.
+- `AppConfig` owns the dashboard port, ESP-NOW channel, probe ports, and timing
+  constants.
 
-## Frame layout
+## TCP port probes
 
-| Bytes | Field |
-| ---: | --- |
-| 0-5 | Destination MAC `FF:FF:FF:FF:FF:FF` |
-| 6-11 | WT32 Ethernet source MAC |
-| 12-13 | Experimental EtherType `0x88B5` |
-| 14-233 | Canonical 220-byte VaydeNet `Packet` |
+The default probe target is the DHCP gateway. The configured ports are `8080`,
+`42691`, `9443`, and `8081`; edit `kProbePorts` in `include/AppConfig.h` to
+change them. The firmware probes one port every two seconds with a 250 ms
+connection timeout, so a complete four-port sweep takes about eight seconds.
 
-The Ethernet frame is 234 bytes before the hardware-added Ethernet FCS. No
-VaydeNet fragmentation is required because the packet is below Ethernet's
-1500-byte payload MTU.
+These are TCP connection probes, not ICMP pings. `Open` means the TCP handshake
+succeeded. `Unavailable` combines connection refusal, timeout, and routing
+failure because a basic connection probe cannot distinguish those causes.
 
-The example derives `senderID` from the 48-bit Ethernet MAC, increments
-`sequenceNumber`, and fills `payload` and `length`. The remaining packet fields,
-including `crc`, remain zero because their canonical values and CRC algorithm
-are not yet defined by VaydeNet.
+Packet payloads use compact port states: `O` is open, `C` is
+closed/unreachable, and `?` means the first probe has not completed.
 
-The broadcast remains inside the local Layer-2 broadcast domain. A switch will
-normally flood it to the other ports in the same VLAN, including the router's
-port. A router will not route this custom EtherType to another IP network.
+## ESP-NOW contract
+
+The sender broadcasts exactly `sizeof(Packet)`, which is statically checked as
+220 bytes. The payload is not wrapped in a 14-byte Ethernet header.
+
+Both devices must use:
+
+- The same packed VaydeNet `Packet` field order and widths.
+- ESP-NOW channel `1`.
+- An unencrypted ESP-NOW broadcast peer at `FF:FF:FF:FF:FF:FF`.
+
+The packet's `senderID` is derived from the WT32 Wi-Fi station MAC and its
+`sequenceNumber` increments before each send. `length` contains the number of
+telemetry bytes including the terminating null byte, matching the working
+VaydeESP sender. Version, type, flags, TTL, and CRC remain zero until VaydeNet
+defines their canonical values.
+
+The ESP-NOW queue result and send callback are sender-side evidence. The
+receiver's serial output or display is required to prove end-to-end reception.
 
 ## Build
 
@@ -76,79 +111,52 @@ From this directory:
 pio run
 ```
 
-Build the LittleFS image containing `data/index.html`, `data/styles.css`, and
-`data/app.js`:
+Build the LittleFS image:
 
 ```sh
 pio run -t buildfs
 ```
 
-## Dashboard port
+Generate the editor compilation database:
 
-The HTTP port is a compile-time setting in `platformio.ini`:
-
-```ini
--D VAYDENET_DASHBOARD_PORT=8080
+```sh
+pio run -t compiledb
 ```
 
-Replace `8080` with any available TCP port from `1` through `65535`, then
-rebuild and upload the firmware. Ports below `1024` are valid on the ESP32 but
-commonly correspond to standard services. The HTML, CSS, and JavaScript files
-do not contain a hard-coded port; the browser uses the same host and port from
-which the page was loaded.
+## Dashboard
 
-This setting controls the board's local TCP listener. It does not configure
-router port forwarding. The dashboard is plain HTTP without authentication and
-should remain on a trusted LAN.
+The committed `platformio.ini` sets the local dashboard listener to TCP port
+`19691`. Change `VAYDENET_DASHBOARD_PORT` there and rebuild to use another port.
 
-The board exposes these routes:
+Routes:
 
 | Route | Response |
 | --- | --- |
 | `/` | Dashboard HTML |
 | `/styles.css` | Dashboard stylesheet |
 | `/app.js` | One-second status polling and page updates |
-| `/api/status` | Live Ethernet and broadcast statistics as JSON |
-| `/health` | Plain-text `ok` health response |
+| `/api/status` | Live Ethernet, TCP-probe, and ESP-NOW statistics as JSON |
+| `/health` | Plain-text `ok` response |
 
-## Editor diagnostics
-
-Generate the local compilation database after adding, removing, or renaming a
-source file:
-
-```sh
-pio run -t compiledb
-```
-
-Open this `ethernet-smoke` directory as the editor workspace. The generated
-`compile_commands.json` is machine-local and intentionally excluded from Git.
+LittleFS dashboard assets are uploaded separately from firmware.
 
 ## Upload
 
-Connect the Flipper Zero USB-UART Bridge to the separate six-pin programming
-block:
+Connect the Flipper Zero USB-UART Bridge to the WT32 programming block:
 
-- Flipper pin 13 TX to WT32 programming RXD
-- Flipper pin 14 RX to WT32 programming TXD
-- Common ground
+- Flipper pin 13 TX to WT32 programming RXD.
+- Flipper pin 14 RX to WT32 programming TXD.
+- Common ground.
 
-Enter download mode by connecting IO0 to ground, pulsing EN, and keeping IO0
-grounded during both uploads. Upload the firmware:
-
-```sh
-pio run -t upload \
-  --upload-port /dev/cu.usbmodemYOUR_DEVICE
-```
-
-Upload the separate LittleFS image containing the webpage:
+Enter download mode by grounding IO0, pulsing EN, and retaining IO0 at ground
+during upload.
 
 ```sh
-pio run -t uploadfs \
-  --upload-port /dev/cu.usbmodemYOUR_DEVICE
+pio run -t upload --upload-port /dev/cu.usbmodemYOUR_DEVICE
+pio run -t uploadfs --upload-port /dev/cu.usbmodemYOUR_DEVICE
 ```
 
-Release IO0 from ground and pulse EN after both uploads to boot the program
-normally.
+Release IO0 and pulse EN to boot normally.
 
 ## Monitor
 
@@ -157,19 +165,6 @@ pio device monitor \
   --port /dev/cu.usbmodemYOUR_DEVICE --baud 115200
 ```
 
-The device reports link state, negotiated speed and duplex, DHCP information,
-link transitions, transmit attempts, driver-accepted frames, rejected frames,
-submitted byte count, the latest ESP-IDF transmit result, and the final
-dashboard URL. Open the reported URL, for example:
-
-```text
-http://192.168.1.50:8080/
-```
-
-`ESP_OK` means the ESP32 Ethernet driver accepted the frame. It is not an
-acknowledgement from the switch or router. Confirm reception with a capture on
-the router or a mirrored switch port using the Wireshark filter:
-
-```text
-eth.type == 0x88b5
-```
+The serial log reports Ethernet state, gateway TCP probes, ESP-NOW
+initialization, station MAC, channel, queued packets, queue failures,
+send-callback results, and the dashboard URL.

@@ -44,8 +44,54 @@ function formatDuration(milliseconds) {
   return parts.join(" ");
 }
 
+function renderPortProbes(portProbes) {
+  const container = elements["port-probes"];
+  if (!container) return;
+
+  setText(
+    "port-probe-target",
+    portProbes.targetAvailable ? portProbes.target : "Waiting for DHCP",
+  );
+  setText(
+    "probe-sweeps",
+    portProbes.completedSweeps === 0
+      ? "No complete sweep yet"
+      : `${integer.format(portProbes.completedSweeps)} complete ${
+          portProbes.completedSweeps === 1 ? "sweep" : "sweeps"
+        }`,
+  );
+
+  const cards = portProbes.ports.map((probe) => {
+    const card = document.createElement("article");
+    const state = !probe.tested ? "pending" : probe.open ? "open" : "closed";
+    card.className = "probe-card";
+    card.dataset.state = state;
+
+    const label = document.createElement("span");
+    label.textContent = `TCP ${probe.port}`;
+
+    const value = document.createElement("strong");
+    value.textContent =
+      state === "pending"
+        ? "Pending"
+        : state === "open"
+          ? "Open"
+          : "Unavailable";
+
+    const detail = document.createElement("small");
+    detail.textContent = probe.tested
+      ? `${integer.format(probe.latencyMs)} ms`
+      : "Awaiting probe";
+
+    card.append(label, value, detail);
+    return card;
+  });
+
+  container.replaceChildren(...cards);
+}
+
 function render(status) {
-  const { device, network, broadcast } = status;
+  const { device, network, portProbes, espNow } = status;
   const linkOnline = network.linkUp && network.dhcpReady;
 
   elements.connection.dataset.state = linkOnline ? "online" : "offline";
@@ -76,21 +122,29 @@ function render(status) {
   setText("link-up-events", integer.format(network.linkUpEvents));
   setText("link-down-events", integer.format(network.linkDownEvents));
 
-  setText("tx-accepted", integer.format(broadcast.driverAccepted));
-  setText("tx-attempts", `${integer.format(broadcast.attempts)} attempts`);
-  setText("tx-rejected", integer.format(broadcast.driverRejected));
-  setText("last-result", `${broadcast.lastResult} (${broadcast.lastResultCode})`);
-  setText("destination", broadcast.destination);
-  setText("ether-type", broadcast.etherType);
-  setText("sequence", integer.format(broadcast.sequenceNumber));
-  setText("packet-size", `${integer.format(broadcast.packetBytes)} bytes`);
-  setText("frame-size", `${integer.format(broadcast.frameBytes)} bytes`);
-  setText("accepted-bytes", formatBytes(broadcast.acceptedBytes));
+  renderPortProbes(portProbes);
+
+  setText("tx-accepted", integer.format(espNow.queueAccepted));
+  setText("tx-attempts", `${integer.format(espNow.attempts)} attempts`);
+  setText("tx-rejected", integer.format(espNow.queueRejected));
+  setText(
+    "last-result",
+    `${espNow.lastQueueResult} (${espNow.lastQueueResultCode})`,
+  );
+  setText("destination", espNow.destination);
+  setText("espnow-channel", `Channel ${espNow.channel}`);
+  setText("station-mac", espNow.stationMac);
+  setText("sequence", integer.format(espNow.sequenceNumber));
+  setText("packet-size", `${integer.format(espNow.packetBytes)} bytes`);
+  setText("delivery-success", integer.format(espNow.deliverySucceeded));
+  setText("delivery-failed", integer.format(espNow.deliveryFailed));
+  setText("last-delivery", espNow.lastDelivery);
+  setText("accepted-bytes", formatBytes(espNow.queuedBytes));
   setText(
     "interval",
-    broadcast.intervalMs === 1000
+    espNow.intervalMs === 1000
       ? "1 second"
-      : `${integer.format(broadcast.intervalMs)} ms`,
+      : `${integer.format(espNow.intervalMs)} ms`,
   );
   setText("uptime", `Uptime ${formatDuration(device.uptimeMs)}`);
 }
