@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#08110f">
+    <title>VaydeNet WT32 Telemetry Sender</title>
+    <link rel="stylesheet" href="/styles.css">
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="VaydeNet dashboard home">
+          <span class="brand-mark" aria-hidden="true">V</span>
+          <span>
+            <strong>VaydeNet</strong>
+            <small>WT32-ETH01 monitor</small>
+          </span>
+        </a>
+        <div class="connection" id="connection" data-state="loading">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span id="connection-label">Connecting</span>
+        </div>
+      </header>
+
+      <main>
+        <section class="hero" aria-labelledby="page-title">
+          <div>
+            <p class="eyebrow">Ethernet telemetry over ESP-NOW</p>
+            <h1 id="page-title">Live sender status</h1>
+            <p class="hero-copy">
+              Current LAN configuration and ESP-NOW transmission counters,
+              reported directly by the WT32-ETH01.
+            </p>
+          </div>
+          <div class="hero-address">
+            <span>Dashboard address</span>
+            <strong id="dashboard-address">Waiting for DHCP</strong>
+            <small id="last-updated">No status received</small>
+          </div>
+        </section>
+
+        <section class="metric-grid" aria-label="Primary status">
+          <article class="metric-card accent-card">
+            <span class="metric-label">Ethernet link</span>
+            <strong class="metric-value" id="link-state">--</strong>
+            <span class="metric-detail" id="link-mode">Awaiting interface</span>
+          </article>
+          <article class="metric-card">
+            <span class="metric-label">IPv4 address</span>
+            <strong class="metric-value mono" id="ipv4">--</strong>
+            <span class="metric-detail" id="hostname">--</span>
+          </article>
+          <article class="metric-card">
+            <span class="metric-label">Queued to ESP-NOW</span>
+            <strong class="metric-value" id="tx-accepted">0</strong>
+            <span class="metric-detail" id="tx-attempts">0 attempts</span>
+          </article>
+          <article class="metric-card">
+            <span class="metric-label">Queue rejected</span>
+            <strong class="metric-value" id="tx-rejected">0</strong>
+            <span class="metric-detail mono" id="last-result">ESP_OK (0)</span>
+          </article>
+        </section>
+
+        <div class="detail-grid">
+          <section class="panel" aria-labelledby="network-heading">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Link and DHCP values</p>
+                <h2 id="network-heading">Network configuration</h2>
+              </div>
+              <span class="panel-tag" id="dhcp-state">DHCP waiting</span>
+            </div>
+            <dl class="data-list">
+              <div><dt>MAC address</dt><dd class="mono" id="mac">--</dd></div>
+              <div><dt>Subnet mask</dt><dd class="mono" id="subnet">--</dd></div>
+              <div><dt>Gateway</dt><dd class="mono" id="gateway">--</dd></div>
+              <div><dt>DNS server</dt><dd class="mono" id="dns">--</dd></div>
+              <div><dt>Link-up events</dt><dd id="link-up-events">0</dd></div>
+              <div><dt>Link-down events</dt><dd id="link-down-events">0</dd></div>
+            </dl>
+          </section>
+
+          <section class="panel" aria-labelledby="broadcast-heading">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Wireless output</p>
+                <h2 id="broadcast-heading">VaydeNet ESP-NOW</h2>
+              </div>
+              <span class="panel-tag mono" id="espnow-channel">Channel 1</span>
+            </div>
+            <dl class="data-list">
+              <div><dt>Destination</dt><dd class="mono" id="destination">--</dd></div>
+              <div><dt>Station MAC</dt><dd class="mono" id="station-mac">--</dd></div>
+              <div><dt>Sequence</dt><dd id="sequence">0</dd></div>
+              <div><dt>Packet size</dt><dd id="packet-size">220 bytes</dd></div>
+              <div><dt>Delivery success</dt><dd id="delivery-success">0</dd></div>
+              <div><dt>Delivery failed</dt><dd id="delivery-failed">0</dd></div>
+              <div><dt>Last delivery</dt><dd id="last-delivery">pending</dd></div>
+              <div><dt>Queued data</dt><dd id="accepted-bytes">0 B</dd></div>
+              <div><dt>Transmit interval</dt><dd id="interval">1 second</dd></div>
+            </dl>
+          </section>
+        </div>
+
+        <section class="panel port-panel" aria-labelledby="port-probe-heading">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Gateway service reachability</p>
+              <h2 id="port-probe-heading">TCP port probes</h2>
+            </div>
+            <span class="panel-tag mono" id="port-probe-target">Waiting for DHCP</span>
+          </div>
+          <div class="probe-grid" id="port-probes" aria-live="polite">
+            <article class="probe-card" data-state="pending">
+              <span>Probe status</span>
+              <strong>Waiting</strong>
+              <small>Gateway unavailable</small>
+            </article>
+          </div>
+          <p class="panel-note" id="probe-sweeps">No complete sweep yet</p>
+        </section>
+
+        <aside class="notice">
+          <strong>Receiver output is the final proof.</strong>
+          <span>
+            Queue and delivery callbacks report sender-side ESP-NOW status.
+            Confirm end-to-end reception on the VaydeESP receiver.
+          </span>
+        </aside>
+      </main>
+
+      <footer>
+        <span>VaydeNet WT32 Ethernet and ESP-NOW example</span>
+        <span id="uptime">Uptime --</span>
+      </footer>
+    </div>
+  </body>
+</html>
