@@ -1,5 +1,11 @@
 idf_component_register(
-    SRCS "Esp32BoardInfo.cpp"
-    INCLUDE_DIRS "."
-    PRIV_REQUIRES esp_hw_support
+    SRCS
+        "Esp32BoardInfo.cpp"
+        "Esp32NodeSettingsStorage.cpp"
+    INCLUDE_DIRS
+        "."
+        "../../VaydeEngine/include"
+    PRIV_REQUIRES
+        esp_hw_support
+        nvs_flash
 )

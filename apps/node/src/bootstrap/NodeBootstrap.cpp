@@ -13,13 +13,29 @@ void NodeBootstrap::run() {
     const NodeSettingsLoadStatus settings_status =
     loadNodeSettings(board_information_, node_settings_);
 
-    switch (settings_status) {
-        case NodeSettingsLoadStatus::Ok:
-            break;
-        case NodeSettingsLoadStatus::NotConfigured:
-            return;
+    if (settings_status != NodeSettingsLoadStatus::Ok) {
+        return;
+    }
 
-        case NodeSettingsLoadStatus::ReadFailed:
+    switch (node_settings_.transport) {
+        case TransportType::EspNow:
+            selected_transport_ = &esp_now_transport_;
+            break;
+
+        case TransportType::Nrf24:
+        case TransportType::Ethernet:
+        case TransportType::Unspecified:
             return;
     }
+
+    const TransportStatus transport_status =
+        selected_transport_->initialize();
+
+    if (transport_status != TransportStatus::Ok) {
+        return;
+    }
+
+    // ESP-NOW should be initialized
+    // VaydeEngine handoff will be here hopefully
+
 }
