@@ -1,0 +1,6 @@
+{
+  "C_Cpp.default.compileCommands": "${workspaceFolder}/compile_commands.json",
+  "clangd.arguments": [
+    "--query-driver=**/toolchain-xtensa-esp32/bin/xtensa-esp32-elf-*"
+  ]
+}
