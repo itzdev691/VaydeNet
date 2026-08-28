@@ -6,5 +6,7 @@ idf_component_register(
     INCLUDE_DIRS
         "."
         "../../../packages/VaydeEngine/include"
-    REQUIRES esp32
+    REQUIRES
+        esp32
+        esp-now
 )
