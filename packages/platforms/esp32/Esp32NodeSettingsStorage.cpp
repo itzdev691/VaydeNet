@@ -3,6 +3,42 @@
 #include "nvs.h"
 #include "nvs_flash.h"
 
+namespace {
+
+constexpr char kSettingsNamespace[] = "vaydenet";
+constexpr char kConfiguredKey[] = "configured";
+constexpr char kTransportKey[] = "transport";
+constexpr char kChannelKey[] = "channel";
+
+SettingsStorageStatus checkConfigured(
+    nvs_handle_t handle
+) {
+    std::uint8_t configured = 0;
+
+    const esp_err_t result =
+        nvs_get_u8(
+            handle,
+            kConfiguredKey,
+            &configured
+        );
+
+    if (result == ESP_ERR_NVS_NOT_FOUND) {
+        return SettingsStorageStatus::NotFound;
+    }
+
+    if (result != ESP_OK) {
+        return SettingsStorageStatus::ReadFailed;
+    }
+
+    if (configured != 1) {
+        return SettingsStorageStatus::NotFound;
+    }
+
+    return SettingsStorageStatus::Ok;
+}
+
+}  // namespace
+
 SettingsStorageStatus initializeNodeSettingsStorage() {
     if (nvs_flash_init() != ESP_OK) {
         return SettingsStorageStatus::InitializationFailed;
@@ -14,8 +50,74 @@ SettingsStorageStatus initializeNodeSettingsStorage() {
 SettingsStorageStatus readNodeSettingsFromStorage(
     NodeSettings& settings
 ) {
-    settings.transport = TransportType::EspNow;
-    settings.channel = 1;
-    // The NVS namespace and key schema still need to be defined.
+    nvs_handle_t handle{};
+
+    const esp_err_t open_result =
+        nvs_open(
+            kSettingsNamespace,
+            NVS_READONLY,
+            &handle
+        );
+
+    if (open_result == ESP_ERR_NVS_NOT_FOUND) {
+        return SettingsStorageStatus::NotFound;
+    }
+
+    if (open_result != ESP_OK) {
+        return SettingsStorageStatus::ReadFailed;
+    }
+
+    const SettingsStorageStatus configured_status =
+        checkConfigured(handle);
+
+    if (configured_status != SettingsStorageStatus::Ok) {
+        nvs_close(handle);
+        return configured_status;
+    }
+
+    NodeSettings candidate{};
+    std::uint8_t stored_transport = 0;
+
+    const esp_err_t transport_result =
+        nvs_get_u8(
+            handle,
+            kTransportKey,
+            &stored_transport
+        );
+
+    if (transport_result != ESP_OK) {
+        nvs_close(handle);
+        return SettingsStorageStatus::ReadFailed;
+    }
+
+    if (
+        stored_transport <
+            static_cast<std::uint8_t>(TransportType::EspNow) ||
+        stored_transport >
+            static_cast<std::uint8_t>(TransportType::Ethernet)
+    ) {
+        nvs_close(handle);
+        return SettingsStorageStatus::ReadFailed;
+    }
+
+    candidate.transport =
+        static_cast<TransportType>(stored_transport);
+
+    const esp_err_t channel_result =
+        nvs_get_u16(
+            handle,
+            kChannelKey,
+            &candidate.channel
+        );
+
+    if (channel_result != ESP_OK) {
+        nvs_close(handle);
+        return SettingsStorageStatus::ReadFailed;
+    }
+
+    nvs_close(handle);
+
+    settings = candidate;
+
     return SettingsStorageStatus::Ok;
 }
