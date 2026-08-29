@@ -23,7 +23,7 @@ SettingsStorageStatus checkConfigured(
         );
 
     if (result == ESP_ERR_NVS_NOT_FOUND) {
-        return SettingsStorageStatus::NotFound;
+        return SettingsStorageStatus::NotConfigured;
     }
 
     if (result != ESP_OK) {
@@ -31,20 +31,20 @@ SettingsStorageStatus checkConfigured(
     }
 
     if (configured != 1) {
-        return SettingsStorageStatus::NotFound;
+        return SettingsStorageStatus::NotConfigured;
     }
 
-    return SettingsStorageStatus::Ok;
+    return SettingsStorageStatus::Configured;
 }
 
 }  // namespace
 
-SettingsStorageStatus initializeNodeSettingsStorage() {
+SettingsStorageInitializationStatus initializeNodeSettingsStorage() {
     if (nvs_flash_init() != ESP_OK) {
-        return SettingsStorageStatus::InitializationFailed;
+        return SettingsStorageInitializationStatus::Failed;
     }
 
-    return SettingsStorageStatus::Ok;
+    return SettingsStorageInitializationStatus::Ok;
 }
 
 SettingsStorageStatus readNodeSettingsFromStorage(
@@ -60,7 +60,7 @@ SettingsStorageStatus readNodeSettingsFromStorage(
         );
 
     if (open_result == ESP_ERR_NVS_NOT_FOUND) {
-        return SettingsStorageStatus::NotFound;
+        return SettingsStorageStatus::NotConfigured;
     }
 
     if (open_result != ESP_OK) {
@@ -70,7 +70,7 @@ SettingsStorageStatus readNodeSettingsFromStorage(
     const SettingsStorageStatus configured_status =
         checkConfigured(handle);
 
-    if (configured_status != SettingsStorageStatus::Ok) {
+    if (configured_status != SettingsStorageStatus::Configured) {
         nvs_close(handle);
         return configured_status;
     }
@@ -119,5 +119,5 @@ SettingsStorageStatus readNodeSettingsFromStorage(
 
     settings = candidate;
 
-    return SettingsStorageStatus::Ok;
+    return SettingsStorageStatus::Configured;
 }

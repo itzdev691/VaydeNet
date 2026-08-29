@@ -1,13 +1,25 @@
 #pragma once
 
+#include <cstdint>
+
 #include "Esp32BoardInfo.h"
 #include "VaydeNet/config/NodeSettings.h"
 #include "EspNowTransport.h"
 #include "VaydeNet/transport/TransportInterface.h"
 
+enum class NodeBootstrapStatus : std::uint8_t {
+    Ready,
+    BoardInformationFailed,
+    NotConfigured,
+    SettingsReadFailed,
+    UnsupportedTransport,
+    InvalidTransportConfiguration,
+    TransportInitializationFailed
+};
+
 class NodeBootstrap {
 public:
-    void run();
+    NodeBootstrapStatus run();
 
 
 private:

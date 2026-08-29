@@ -6,9 +6,36 @@
 #include "esp_wifi.h"
 #include "nvs_flash.h"
 
+namespace {
+
+constexpr std::uint16_t kMinimumWifiChannel = 1;
+constexpr std::uint16_t kMaximumWifiChannel = 14;
+
+}  // namespace
+
+bool EspNowTransport::configureChannel(std::uint16_t channel) {
+    if (
+        channel < kMinimumWifiChannel ||
+        channel > kMaximumWifiChannel
+    ) {
+        return false;
+    }
+
+    if (initialized_) {
+        return channel_ == channel;
+    }
+
+    channel_ = static_cast<std::uint8_t>(channel);
+    return true;
+}
+
 TransportStatus EspNowTransport::initialize() {
     if (initialized_) {
         return TransportStatus::Ok;
+    }
+
+    if (channel_ == 0) {
+        return TransportStatus::InitializationFailed;
     }
 
     if (nvs_flash_init() != ESP_OK) {
@@ -38,6 +65,15 @@ TransportStatus EspNowTransport::initialize() {
     }
 
     if (esp_wifi_start() != ESP_OK) {
+        return TransportStatus::InitializationFailed;
+    }
+
+    if (
+        esp_wifi_set_channel(
+            channel_,
+            WIFI_SECOND_CHAN_NONE
+        ) != ESP_OK
+    ) {
         return TransportStatus::InitializationFailed;
     }
 

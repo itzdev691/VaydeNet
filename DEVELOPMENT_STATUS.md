@@ -1,231 +1,204 @@
 # VaydeNet Development Status
 
-Snapshot: August 22, 2026
+Snapshot: August 29, 2026
 
-VaydeNet is being developed as a hardware-independent communication framework for embedded systems. Its application-facing interface is intended to work across ESP-NOW, nRF24L01, LoRa, Bluetooth, Wi-Fi, Ethernet, and future transports.
+VaydeNet is being developed as a hardware-independent communication framework for embedded systems. The intended application boundary remains independent of ESP-NOW, nRF24L01, LoRa, Bluetooth, Wi-Fi, Ethernet, and future transports.
 
-This document separates the revised protocol direction from code that currently exists. The revised protocol is not implemented yet.
+The active implementation checkpoint is the ESP32 node bootstrap. It can retrieve board information, read a minimal configuration from NVS, select ESP-NOW, apply the configured Wi-Fi channel, initialize ESP-NOW, and report a specific startup result. It does not yet start VaydeEngine or exchange application messages.
 
-## Revised Protocol Direction
+## Current Startup Path
 
-VaydeNet will not require every radio to transmit one identical binary packet or one fixed packet size.
-
-The universal part of VaydeNet will be a shared protocol identity and message model. Each transport adapter will encode that information in a frame suited to its radio.
-
-```text
-Application message
-    -> VaydeNet identity and message metadata
-    -> transport adapter
-    -> ESP-NOW, nRF24L01, LoRa, Bluetooth, Wi-Fi, or Ethernet frame
-```
-
-This replaces the earlier assumption that every transport must carry the current packed 220-byte `Packet` unchanged.
-
-### VaydeNet identity
-
-Every VaydeNet message must carry enough common information to answer these questions:
-
-- Is this a VaydeNet message?
-- Which protocol version does it use?
-- What kind of message is it?
-- Which VaydeNet node sent it?
-- Which logical message does it belong to?
-- How many payload bytes are valid?
-
-The common metadata is expected to include:
-
-- a VaydeNet protocol identifier or signature;
-- a protocol version;
-- a message type;
-- a source-node identifier;
-- a sequence number;
-- flags;
-- a payload length.
-
-Network identity, destination identity, routing lifetime, integrity, and authentication fields still require design decisions. The final field sizes and serialized layout are not defined.
-
-The protocol identifier identifies VaydeNet traffic. The source-node identifier identifies the device that sent the message. These are separate concepts.
-
-A protocol identifier is not proof that a sender is trusted. Authentication and message integrity require a separate mechanism.
-
-### Purpose-independent communication
-
-Devices do not need to perform the same job to communicate through VaydeNet. They need a compatible VaydeNet protocol version, a compatible transport profile, and at least one message type they both understand.
-
-VaydeNet interoperability has three levels:
-
-1. **Recognition:** a device can identify a VaydeNet message.
-2. **Transport:** a device can receive, relay, fragment, or reassemble the message.
-3. **Interpretation:** a device understands the message's application payload.
-
-A gateway may relay a message without understanding its payload. A display may accept sensor-data messages while ignoring motor-control messages. Nodes will eventually advertise capabilities so differently purposed devices can discover which messages and services they support.
-
-Initial general message categories are expected to include discovery, capability announcement, data, command, acknowledgement, error, and fragment messages. These categories are design targets, not implemented protocol values.
-
-## Transport-Native Frames
-
-Each adapter owns its radio-facing frame layout. Radio frames do not need to be byte-for-byte identical across transports.
-
-The adapter is responsible for:
-
-- adding or encoding the required VaydeNet identity;
-- fitting the message into the transport's payload limit;
-- using transport-native addressing where appropriate;
-- fragmenting messages only when required;
-- reassembling fragmented messages before delivery;
-- validating lengths, versions, and integrity information;
-- translating the received frame into the common VaydeNet message model.
-
-This means transport independence exists at the VaydeNet API and message-semantics boundary, not at the physical-frame boundary.
-
-### nRF24L01 direction
-
-An nRF24L01 frame can be a complete VaydeNet message. It no longer needs to be one fragment of a mandatory 220-byte packet.
-
-The current design target is a packed 32-byte transport frame containing a compact VaydeNet header and a small application payload. One illustrative allocation is:
-
-```text
-32-byte nRF24 frame
-    12-byte VaydeNet identity/control header
-    20-byte application payload
-```
-
-The 12-byte and 20-byte split is not a finalized ABI. It demonstrates that common sensor readings, status changes, button events, commands, acknowledgements, and discovery messages can fit into one radio transmission.
-
-Fragmentation remains available as an optional message type:
-
-- a message that fits the transport payload is sent as one complete frame;
-- a larger message is divided into fragment frames;
-- the receiving adapter reassembles and validates the original message;
-- applications and VaydeEngine do not manipulate radio fragments directly.
-
-The earlier design in which a 220-byte packet always became 22 nRF24 fragments is no longer the default protocol model.
-
-### Other transports
-
-ESP-NOW, LoRa, Bluetooth, Wi-Fi, and Ethernet adapters may use different frame sizes and different transport-specific metadata. They must preserve the required VaydeNet identity and message meaning.
-
-A transport with more capacity may carry a larger VaydeNet payload in one frame. A constrained transport may use a compact payload, fragmentation, streaming, or an application-specific message sequence.
-
-## Current Implementation
-
-### Existing 220-byte packet
-
-`packages/VaydeEngine/include/VaydeNet/packet/Packet.h` currently defines a packed 220-byte structure containing version, type, flags, TTL, length, sender ID, sequence number, a 200-byte payload, and CRC.
-
-Compile-time validation currently fixes this structure at 220 bytes. It represents the previous packet model and is still used by the ESP-NOW examples. It has not yet been replaced by the revised VaydeNet identity and transport-native framing model.
-
-The existing structure must not be described as the final universal wire format. Migration or replacement requires a separate implementation change after the common message contract and transport profiles are defined.
-
-### ESP-NOW experiment
-
-`apps/examples/esp-now/` contains sender and receiver prototypes that transmit the existing 220-byte `Packet` directly.
-
-These examples prove only the earlier direct-structure experiment. They do not implement the revised protocol identifier, capability discovery, finalized message types, serialization rules, validation policy, or a reusable ESP-NOW adapter.
-
-### nRF24L01 experiment
-
-`apps/examples/nrf24l01/` currently contains local project configuration and generated development artifacts, but the current working tree does not contain an end-to-end sender and receiver implementation of the revised 32-byte VaydeNet frame.
-
-The nRF24L01 transport still needs:
-
-- a finalized compact frame layout;
-- a VaydeNet protocol identifier;
-- sender and receiver implementations using the same frame type;
-- payload-length and protocol-version validation;
-- optional fragmentation and reassembly for larger messages;
-- hardware verification;
-- migration into a reusable adapter after the prototype is validated.
-
-### Ethernet experiment
-
-The local `apps/examples/wt32-eth01/` area currently contains generated build and editor-index artifacts. The current branch does not contain tracked WT32-ETH01 source code. Ethernet transport support must not be treated as implemented on this branch.
-
-### ESP32 board information
-
-`packages/platforms/esp32/` contains local ESP32 board-information work that can:
-
-- read the default hardware MAC from the ESP32 eFuse;
-- use it as the initial device UID;
-- retrieve the compile-time board model;
-- report UID and board-model failures through `BoardInfoStatus`.
-
-This work is not yet part of a completed VaydeEngine startup sequence.
-
-### Node settings scaffold
-
-`packages/VaydeEngine/include/VaydeNet/config/NodeSettings.h` now defines an initial portable settings structure containing:
-
-- logical node and network identifiers;
-- protocol and settings-format versions;
-- an explicitly unspecified transport selection and channel;
-- capability flags;
-- a security mode.
-
-`apps/node/src/NodeSettingsLoader.h` declares the application-side loading contract. Its current `.cpp` implementation returns `NodeSettingsLoadStatus::NotConfigured`; it does not read NVS, apply defaults, validate stored data, or populate `NodeSettings` yet.
-
-The loader source and VaydeEngine public include path are registered in the node component. A PlatformIO ESP32-S3 build completed successfully after registration, confirming the new source and headers compile. This is compile validation only, not settings-loading or hardware validation.
-
-### Node application scaffold
-
-`apps/node/` contains local ESP-IDF bootstrap work:
-
-```text
-ESP-IDF
-    -> app_main()
-    -> NodeBootstrap::run()
-    -> retrieveBoardInformation()
-```
-
-`NodeBootstrap` currently owns a `BoardInformation` object and stops when retrieval fails. It does not yet own a `NodeSettings` object or call `loadNodeSettings()`. It also does not report startup failures, create an engine startup context, initialize a transport, start VaydeEngine, or enter a node-ready state.
-
-## Planned Software Boundary
-
-The intended startup and ownership boundary remains:
+The current node application follows this path:
 
 ```text
 ESP-IDF app_main()
-    -> NodeBootstrap
-    -> EngineStartupContext
-    -> VaydeEngine::start()
-    -> selected transport adapter
+    -> NodeBootstrap::run()
+    -> retrieveBoardInformation()
+    -> initializeNodeSettingsStorage()
+    -> readNodeSettingsFromStorage()
+    -> select configured transport
+    -> configure ESP-NOW channel
+    -> EspNowTransport::initialize()
+    -> return and log NodeBootstrapStatus
 ```
 
-Responsibilities are divided as follows:
+`NodeBootstrapStatus::Ready` currently means that board information, settings loading, transport selection, channel configuration, and ESP-NOW initialization succeeded. It does not mean that VaydeEngine is running or that another device received a packet.
 
-- `app_main()` enters the application bootstrap.
-- `NodeBootstrap` retrieves physical board information, loads logical node settings, and creates and connects concrete platform dependencies.
-- The node application owns settings-loading policy; ESP32-specific persistence belongs in the ESP32 platform package.
-- `EngineStartupContext` exposes those dependencies to the portable engine.
-- VaydeEngine works with logical VaydeNet messages rather than physical radio frames.
-- `packages/platforms/esp32/` implements ESP32-specific hardware operations.
-- `packages/adapters/` will contain transport-specific encoding, framing, validation, fragmentation, and reassembly.
-- Applications define which message types and capabilities they understand.
+The bootstrap reports distinct results for:
 
-`EngineStartupContext`, `VaydeEngine::start()`, the common message API, capability discovery, routing, configuration interfaces, and reusable transport adapters are not implemented.
+- board-information failure;
+- an unconfigured node;
+- a settings read failure;
+- an unsupported transport;
+- invalid transport configuration;
+- transport initialization failure;
+- successful completion of the current bootstrap stage.
 
-## Protocol Milestones
+## Implemented Components
 
-The revised protocol direction requires these milestones in order:
+### ESP32 board information
 
-1. Define the minimum VaydeNet identity and the meaning of each common field.
-2. Define serialization rules independently of packed C++ memory layouts.
-3. Define message-type and capability identifiers.
-4. Define the first nRF24L01 32-byte transport profile.
-5. Implement and hardware-test single-frame nRF24L01 messages.
-6. Add optional fragmentation only for messages that exceed the single-frame payload.
-7. Revise the ESP-NOW experiment to use the same logical message contract through an ESP-NOW-specific frame encoding.
-8. Extract validated experiments into reusable adapters.
-9. Connect the common message API and selected adapter to VaydeEngine startup.
+`packages/platforms/esp32/Esp32BoardInfo.cpp` retrieves:
+
+- the default ESP32 eFuse MAC as a six-byte device UID;
+- the compile-time `VAYDENET_BOARD_MODEL` value.
+
+Failures are returned through `BoardInfoStatus`. This identifies the physical board but does not provision a logical node identity.
+
+### Portable node settings contract
+
+`packages/VaydeEngine/include/VaydeNet/config/NodeSettings.h` defines the current portable settings structure:
+
+- logical node and network identifiers;
+- protocol and settings-format versions;
+- selected transport;
+- channel;
+- capability flags;
+- security mode.
+
+The transport defaults to `TransportType::Unspecified`. The structure contains `std::string` members and must not be serialized as raw memory.
+
+### ESP32 NVS settings read path
+
+`packages/platforms/esp32/Esp32NodeSettingsStorage.cpp` initializes NVS and reads the minimal stored configuration from the `vaydenet` namespace.
+
+The implemented keys are:
+
+| Key | Type | Meaning |
+| --- | --- | --- |
+| `configured` | `uint8_t` | Must equal `1` before settings are accepted |
+| `transport` | `uint8_t` | Must map to `EspNow`, `Nrf24`, or `Ethernet` |
+| `channel` | `uint16_t` | Passed to the selected transport |
+
+Settings are read into a temporary `NodeSettings` object and assigned only after every required read succeeds. Missing namespace data or a missing/inactive `configured` marker is reported as `NotConfigured`; malformed, missing, or unreadable required values are reported as `ReadFailed`.
+
+Only `transport` and `channel` are loaded. Node ID, network ID, version fields, capabilities, and security settings retain their in-code defaults. No production provisioning or settings-write path exists.
+
+### Transport boundary
+
+`packages/VaydeEngine/include/VaydeNet/transport/TransportInterface.h` currently defines a portable initialization contract only:
+
+```text
+TransportInterface::initialize() -> TransportStatus
+```
+
+It does not yet define send, receive, addressing, discovery, callbacks, or message delivery into VaydeEngine.
+
+### ESP-NOW adapter initialization
+
+`packages/adapters/esp-now/EspNowTransport.cpp` currently performs:
+
+1. configured-channel validation;
+2. NVS initialization;
+3. network-interface initialization;
+4. default event-loop creation;
+5. Wi-Fi driver initialization;
+6. RAM-backed Wi-Fi storage selection;
+7. Wi-Fi station-mode selection and startup;
+8. primary-channel application through `esp_wifi_set_channel()`;
+9. ESP-NOW initialization.
+
+The accepted configured channel range is `1` through `14`. Initialization is rejected when no channel has been configured. Reinitialization returns success after a successful first initialization.
+
+The adapter does not yet register peers or callbacks, send or receive data, validate VaydeNet messages, or perform fragmentation and reassembly.
+
+## Existing Packet and Experiments
+
+### Legacy 220-byte packet
+
+`packages/VaydeEngine/include/VaydeNet/packet/Packet.h` still defines a packed 220-byte structure with version, type, flags, TTL, length, sender ID, sequence number, a 200-byte payload, and CRC.
+
+This is the current prototype packet used by ESP-NOW examples. It is not the finalized universal wire format for every transport. CRC behavior, canonical message types, flag meanings, TTL processing, length validation, acknowledgements, authentication, and duplicate suppression remain undefined or unimplemented.
+
+### ESP-NOW sender and receiver
+
+`apps/examples/esp-now/` contains standalone Arduino/PlatformIO sender and receiver prototypes. They transmit the packed 220-byte `Packet` directly. They are isolated experiments, not the reusable ESP-NOW adapter used by `apps/node`.
+
+### Message inbox simulator
+
+`apps/examples/message-inbox-simulator/` is a hardware-free learning example for logical message delivery into a node inbox. It is not connected to the production packet, transport, bootstrap, or engine code.
+
+### nRF24L01
+
+`apps/examples/nrf24l01/` currently contains PlatformIO configuration only. There is no tracked sender/receiver source implementing a VaydeNet nRF24L01 frame.
+
+### WT32-ETH01
+
+`apps/examples/wt32-eth01/ethernet-smoke/` is a tracked standalone experiment. It monitors LAN8720 Ethernet state, probes configured TCP ports, serves a local dashboard, and broadcasts telemetry as the legacy 220-byte `Packet` over ESP-NOW.
+
+It does not provide a reusable Ethernet transport adapter or connect Ethernet to the node bootstrap.
+
+## Revised Protocol Direction
+
+VaydeNet will not require every transport to carry one identical packed C++ structure or one fixed frame size.
+
+The intended boundary is:
+
+```text
+Application message
+    -> common VaydeNet identity and message semantics
+    -> transport adapter encoding
+    -> transport-native frame
+```
+
+Each adapter will own its payload limit, addressing, serialization, validation, optional fragmentation and reassembly, and translation back to the common logical message model.
+
+A VaydeNet message is expected to carry enough common information to identify the protocol and version, message type, source node, logical message or sequence, flags, and valid payload length. Exact fields, widths, serialization rules, integrity protection, authentication, routing, and capability identifiers are not finalized.
+
+A protocol identifier recognizes VaydeNet traffic. A source-node identifier identifies the sender. Neither authenticates the sender.
+
+For nRF24L01, a complete logical message should fit into one 32-byte transport frame when possible. Fragmentation should be optional for larger messages rather than mandatory conversion of every message from the legacy 220-byte packet. The exact nRF24L01 frame layout is still design work.
+
+## Missing Core Work
+
+The current checkpoint does not include:
+
+- an NVS provisioning or settings-write workflow;
+- loading the full `NodeSettings` schema;
+- tests for empty, missing, corrupt, valid, and unsupported stored settings;
+- ESP-NOW peer management;
+- ESP-NOW send and receive callbacks;
+- packet or logical-message I/O through the reusable adapter;
+- a common serialized VaydeNet message contract;
+- finalized protocol identity, message types, capability discovery, or authentication;
+- transport-native nRF24L01, LoRa, Bluetooth, Wi-Fi, or Ethernet adapters;
+- `EngineStartupContext`;
+- `VaydeEngine::start()` and the handoff from bootstrap into the engine;
+- an operational node-ready loop;
+- hardware smoke testing of the current NVS, channel, and bootstrap paths;
+- end-to-end packet reception proof.
+
+## Validation
+
+The current source was clean-built for the PlatformIO `espnow_esp32s3` environment on August 29, 2026:
+
+```sh
+PLATFORMIO_CORE_DIR=/Volumes/ExtVault/.platformio-vaydenet \
+  /Users/itz.devv/.platformio/penv/bin/platformio run \
+  -d apps/node --target clean
+
+PLATFORMIO_CORE_DIR=/Volumes/ExtVault/.platformio-vaydenet \
+  /Users/itz.devv/.platformio/penv/bin/platformio run \
+  -d apps/node
+```
+
+The build completed successfully and compiled the node bootstrap, settings loader, ESP32 settings storage, board-information component, and ESP-NOW adapter. This proves compilation and linking only. The firmware was not flashed, the NVS paths were not exercised on hardware, and ESP-NOW communication was not observed.
+
+`git diff --check` also passed after this document update.
 
 ## Repository State
 
-The active branch is `agent/esp32-node-bootstrap` at commit `09aec17` (`Add VaydeNet packet and ESP-NOW examples`).
+The active development branch is `agent/esp32-node-bootstrap`. Commit `7fbdefc` (`Implement ESP32 NVS settings check`) established the minimal NVS settings-read checkpoint.
 
-`DEVELOPMENT_STATUS.md`, the node-bootstrap work, the portable node-settings structure, the application-side settings-loader scaffold, and the ESP32 platform component are currently uncommitted. Unrelated ESP-NOW ignore files, nRF24L01 files, WT32-ETH01 files, and generated artifacts are also present in the working tree. These areas must remain separated and explicitly staged; `git add -A` is unsafe for this branch.
+This status snapshot also covers explicit bootstrap status reporting, separation of NVS initialization status from stored-settings status, validation and application of the configured ESP-NOW channel, and bootstrap-result logging from `app_main()`.
 
-## Current Capability Boundary
+The branch also contains multiple concerns relative to `main`, including node bootstrap work, the ESP-NOW adapter, example configuration, and the message-inbox simulator. Build success does not make the complete branch merge-ready. Scope cleanup, documentation review, focused commits, settings-path testing, and hardware validation remain required before merge.
 
-VaydeNet currently has an earlier 220-byte packet structure, ESP-NOW prototypes using that structure, local ESP32 node-bootstrap work, an initial portable `NodeSettings` structure, and a settings-loader contract that currently reports `NotConfigured`.
+## Immediate Development Sequence
 
-It does not yet have stored-settings loading, settings validation, the revised VaydeNet identity contract, transport-native frame profiles, capability discovery, a working nRF24L01 VaydeNet frame, routing, reliable delivery, reusable adapters, or a running VaydeEngine.
+1. Add and validate a controlled NVS provisioning method for `configured`, `transport`, and `channel`.
+2. Exercise unconfigured, missing-key, invalid-transport, invalid-channel, valid-settings, and NVS-failure paths.
+3. Flash the ESP32-S3 and verify the returned bootstrap status and applied Wi-Fi channel.
+4. Add ESP-NOW peer registration and send/receive callbacks behind the adapter boundary.
+5. Define the logical message contract before connecting message I/O to VaydeEngine.
+6. Add `EngineStartupContext` and hand a successfully initialized transport into `VaydeEngine::start()`.

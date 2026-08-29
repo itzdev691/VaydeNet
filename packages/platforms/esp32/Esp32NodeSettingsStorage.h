@@ -4,14 +4,18 @@
 
 #include "VaydeNet/config/NodeSettings.h"
 
-enum class SettingsStorageStatus : std::uint8_t {
+enum class SettingsStorageInitializationStatus : std::uint8_t {
     Ok,
-    NotFound,
-    InitializationFailed,
+    Failed
+};
+
+enum class SettingsStorageStatus : std::uint8_t {
+    Configured,
+    NotConfigured,
     ReadFailed
 };
 
-SettingsStorageStatus initializeNodeSettingsStorage();
+SettingsStorageInitializationStatus initializeNodeSettingsStorage();
 
 SettingsStorageStatus readNodeSettingsFromStorage(
     NodeSettings& settings

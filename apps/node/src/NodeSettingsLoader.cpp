@@ -5,10 +5,13 @@ NodeSettingsLoadStatus loadNodeSettings(
     const BoardInformation&,
     NodeSettings& settings
 ) {
-    const SettingsStorageStatus initialization_status =
+    const SettingsStorageInitializationStatus initialization_status =
         initializeNodeSettingsStorage();
 
-    if (initialization_status != SettingsStorageStatus::Ok) {
+    if (
+        initialization_status !=
+        SettingsStorageInitializationStatus::Ok
+    ) {
         return NodeSettingsLoadStatus::ReadFailed;
     }
 
@@ -16,13 +19,12 @@ NodeSettingsLoadStatus loadNodeSettings(
         readNodeSettingsFromStorage(settings);
 
     switch (storage_status) {
-        case SettingsStorageStatus::Ok:
+        case SettingsStorageStatus::Configured:
             return NodeSettingsLoadStatus::Ok;
 
-        case SettingsStorageStatus::NotFound:
+        case SettingsStorageStatus::NotConfigured:
             return NodeSettingsLoadStatus::NotConfigured;
 
-        case SettingsStorageStatus::InitializationFailed:
         case SettingsStorageStatus::ReadFailed:
             return NodeSettingsLoadStatus::ReadFailed;
     }
