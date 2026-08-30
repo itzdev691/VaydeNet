@@ -9,9 +9,10 @@
 
 enum class NodeBootstrapStatus : std::uint8_t {
     Ready,
+    ReadyAfterProvisioning,
     BoardInformationFailed,
-    NotConfigured,
     SettingsReadFailed,
+    SettingsWriteFailed,
     UnsupportedTransport,
     InvalidTransportConfiguration,
     TransportInitializationFailed

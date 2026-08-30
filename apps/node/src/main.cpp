@@ -1,6 +1,8 @@
 #include "bootstrap/NodeBootstrap.h"
 
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 namespace {
 
@@ -9,6 +11,10 @@ constexpr char kLogTag[] = "NodeBootstrap";
 }  // namespace
 
 extern "C" void app_main() {
+    // Give the native USB Serial/JTAG monitor time to reconnect after reset.
+    vTaskDelay(pdMS_TO_TICKS(2000));
+    ESP_LOGI(kLogTag, "Node firmware starting");
+
     static NodeBootstrap bootstrap;
     const NodeBootstrapStatus status = bootstrap.run();
 
@@ -17,8 +23,11 @@ extern "C" void app_main() {
             ESP_LOGI(kLogTag, "Bootstrap ready");
             return;
 
-        case NodeBootstrapStatus::NotConfigured:
-            ESP_LOGW(kLogTag, "Node settings are not configured");
+        case NodeBootstrapStatus::ReadyAfterProvisioning:
+            ESP_LOGI(
+                kLogTag,
+                "Bootstrap ready; default node settings written to NVS"
+            );
             return;
 
         case NodeBootstrapStatus::BoardInformationFailed:
@@ -27,6 +36,10 @@ extern "C" void app_main() {
 
         case NodeBootstrapStatus::SettingsReadFailed:
             ESP_LOGE(kLogTag, "Node settings read failed");
+            return;
+
+        case NodeBootstrapStatus::SettingsWriteFailed:
+            ESP_LOGE(kLogTag, "Node settings write failed");
             return;
 
         case NodeBootstrapStatus::UnsupportedTransport:

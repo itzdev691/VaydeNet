@@ -13,12 +13,15 @@ NodeBootstrapStatus NodeBootstrap::run() {
     const NodeSettingsLoadStatus settings_status =
         loadNodeSettings(board_information_, node_settings_);
 
-    if (settings_status == NodeSettingsLoadStatus::NotConfigured) {
-        return NodeBootstrapStatus::NotConfigured;
-    }
+    const bool settings_were_provisioned =
+        settings_status == NodeSettingsLoadStatus::Provisioned;
 
     if (settings_status == NodeSettingsLoadStatus::ReadFailed) {
         return NodeBootstrapStatus::SettingsReadFailed;
+    }
+
+    if (settings_status == NodeSettingsLoadStatus::WriteFailed) {
+        return NodeBootstrapStatus::SettingsWriteFailed;
     }
 
     switch (node_settings_.transport) {
@@ -47,6 +50,10 @@ NodeBootstrapStatus NodeBootstrap::run() {
 
     // ESP-NOW should be initialized
     // VaydeEngine handoff will be here.
+
+    if (settings_were_provisioned) {
+        return NodeBootstrapStatus::ReadyAfterProvisioning;
+    }
 
     return NodeBootstrapStatus::Ready;
 }

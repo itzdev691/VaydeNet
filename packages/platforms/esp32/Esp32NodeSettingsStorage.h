@@ -15,8 +15,17 @@ enum class SettingsStorageStatus : std::uint8_t {
     ReadFailed
 };
 
+enum class SettingsStorageWriteStatus : std::uint8_t {
+    Ok,
+    WriteFailed
+};
+
 SettingsStorageInitializationStatus initializeNodeSettingsStorage();
 
 SettingsStorageStatus readNodeSettingsFromStorage(
     NodeSettings& settings
+);
+
+SettingsStorageWriteStatus writeNodeSettingsToStorage(
+    const NodeSettings& settings
 );

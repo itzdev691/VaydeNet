@@ -121,3 +121,79 @@ SettingsStorageStatus readNodeSettingsFromStorage(
 
     return SettingsStorageStatus::Configured;
 }
+
+SettingsStorageWriteStatus writeNodeSettingsToStorage(
+    const NodeSettings& settings
+) {
+    const std::uint8_t stored_transport =
+        static_cast<std::uint8_t>(settings.transport);
+
+    if (
+        stored_transport <
+            static_cast<std::uint8_t>(TransportType::EspNow) ||
+        stored_transport >
+            static_cast<std::uint8_t>(TransportType::Ethernet)
+    ) {
+        return SettingsStorageWriteStatus::WriteFailed;
+    }
+
+    nvs_handle_t handle{};
+
+    const esp_err_t open_result =
+        nvs_open(
+            kSettingsNamespace,
+            NVS_READWRITE,
+            &handle
+        );
+
+    if (open_result != ESP_OK) {
+        return SettingsStorageWriteStatus::WriteFailed;
+    }
+
+    const esp_err_t transport_result =
+        nvs_set_u8(
+            handle,
+            kTransportKey,
+            stored_transport
+        );
+
+    if (transport_result != ESP_OK) {
+        nvs_close(handle);
+        return SettingsStorageWriteStatus::WriteFailed;
+    }
+
+    const esp_err_t channel_result =
+        nvs_set_u16(
+            handle,
+            kChannelKey,
+            settings.channel
+        );
+
+    if (channel_result != ESP_OK) {
+        nvs_close(handle);
+        return SettingsStorageWriteStatus::WriteFailed;
+    }
+
+    const esp_err_t configured_result =
+        nvs_set_u8(
+            handle,
+            kConfiguredKey,
+            1
+        );
+
+    if (configured_result != ESP_OK) {
+        nvs_close(handle);
+        return SettingsStorageWriteStatus::WriteFailed;
+    }
+
+    const esp_err_t commit_result =
+        nvs_commit(handle);
+
+    nvs_close(handle);
+
+    if (commit_result != ESP_OK) {
+        return SettingsStorageWriteStatus::WriteFailed;
+    }
+
+    return SettingsStorageWriteStatus::Ok;
+}

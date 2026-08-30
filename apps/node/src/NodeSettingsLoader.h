@@ -7,8 +7,9 @@
 
 enum class NodeSettingsLoadStatus : std::uint8_t {
     Ok,
-    NotConfigured,
-    ReadFailed
+    Provisioned,
+    ReadFailed,
+    WriteFailed
 };
 
 NodeSettingsLoadStatus loadNodeSettings(
