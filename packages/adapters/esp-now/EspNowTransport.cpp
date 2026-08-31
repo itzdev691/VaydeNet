@@ -5,11 +5,37 @@
 #include "esp_now.h"
 #include "esp_wifi.h"
 #include "nvs_flash.h"
+#include "esp_log.h"
+#include "esp_mac.h"
 
 namespace {
 
 constexpr std::uint16_t kMinimumWifiChannel = 1;
 constexpr std::uint16_t kMaximumWifiChannel = 14;
+constexpr char kLogTag[] = "EspNowTransport";
+
+void onDataReceived(
+    const esp_now_recv_info_t *receive_info,
+    const uint8_t *data,
+    int data_length
+) {
+    if (
+        receive_info == nullptr ||
+        receive_info->src_addr == nullptr ||
+        data == nullptr ||
+        data_length <= 0
+    ) {
+        ESP_LOGW(kLogTag, "Invalid ESP-NOW receive callback data");
+        return;
+    }
+
+    ESP_LOGI(
+        kLogTag,
+        "ESPNOW RX sender=" MACSTR " bytes=%d",
+        MAC2STR(receive_info->src_addr),
+        data_length
+    );
+}
 
 }  // namespace
 
@@ -78,6 +104,11 @@ TransportStatus EspNowTransport::initialize() {
     }
 
     if (esp_now_init() != ESP_OK) {
+        return TransportStatus::InitializationFailed;
+    }
+
+    if (esp_now_register_recv_cb(onDataReceived) != ESP_OK) {
+        (void)esp_now_deinit();
         return TransportStatus::InitializationFailed;
     }
 

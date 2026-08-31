@@ -1,10 +1,10 @@
 # VaydeNet Development Status
 
-Snapshot: August 29, 2026
+Snapshot: August 30, 2026
 
 VaydeNet is being developed as a hardware-independent communication framework for embedded systems. The intended application boundary remains independent of ESP-NOW, nRF24L01, LoRa, Bluetooth, Wi-Fi, Ethernet, and future transports.
 
-The active implementation checkpoint is the ESP32 node bootstrap. It can retrieve board information, read a minimal configuration from NVS, select ESP-NOW, apply the configured Wi-Fi channel, initialize ESP-NOW, and report a specific startup result. It does not yet start VaydeEngine or exchange application messages.
+The active implementation checkpoint is the ESP32 node bootstrap. It can retrieve board information, read a minimal configuration from NVS, select ESP-NOW, apply the configured Wi-Fi channel, initialize ESP-NOW, register a receive callback, log incoming frame metadata, and report a specific startup result. It does not yet start VaydeEngine or exchange validated application messages through the reusable adapter.
 
 ## Current Startup Path
 
@@ -20,10 +20,11 @@ ESP-IDF app_main()
     -> select configured transport
     -> configure ESP-NOW channel
     -> EspNowTransport::initialize()
+        -> register ESP-NOW receive callback
     -> return and log NodeBootstrapStatus
 ```
 
-`NodeBootstrapStatus::Ready` currently means that board information, settings loading, transport selection, channel configuration, and ESP-NOW initialization succeeded. It does not mean that VaydeEngine is running or that another device received a packet.
+`NodeBootstrapStatus::Ready` currently means that board information, settings loading, transport selection, channel configuration, ESP-NOW initialization, and receive-callback registration succeeded. It does not mean that VaydeEngine is running or that an incoming frame has been validated as a VaydeNet message.
 
 `NodeBootstrapStatus::ReadyAfterProvisioning` means the same initialization completed after the loader created and committed the current development defaults: ESP-NOW on channel `1`.
 
@@ -108,11 +109,14 @@ It does not yet define send, receive, addressing, discovery, callbacks, or messa
 6. RAM-backed Wi-Fi storage selection;
 7. Wi-Fi station-mode selection and startup;
 8. primary-channel application through `esp_wifi_set_channel()`;
-9. ESP-NOW initialization.
+9. ESP-NOW initialization;
+10. ESP-NOW receive-callback registration.
 
 The accepted configured channel range is `1` through `14`. Initialization is rejected when no channel has been configured. Reinitialization returns success after a successful first initialization.
 
-The adapter does not yet register peers or callbacks, send or receive data, validate VaydeNet messages, or perform fragmentation and reassembly.
+The receive callback rejects null metadata, null source addresses, null payload pointers, and non-positive lengths. For accepted callbacks, it logs the sender MAC address and received byte count.
+
+The adapter does not yet register peers, transmit data, register a send-completion callback, copy or queue received bytes, validate the 220-byte prototype packet, deliver a logical message into VaydeEngine, or perform fragmentation and reassembly.
 
 ## Existing Packet and Experiments
 
@@ -124,7 +128,7 @@ This is the current prototype packet used by ESP-NOW examples. It is not the fin
 
 ### ESP-NOW sender and receiver
 
-`apps/examples/esp-now/` contains standalone Arduino/PlatformIO sender and receiver prototypes. They transmit the packed 220-byte `Packet` directly. They are isolated experiments, not the reusable ESP-NOW adapter used by `apps/node`.
+`apps/examples/esp-now/` contains standalone Arduino/PlatformIO sender and receiver prototypes. They transmit the packed 220-byte `Packet` directly. The sender configuration includes a four-megabyte ESP32-S3 Zero target used to generate the traffic observed by the node receive callback. These examples remain isolated hardware tools rather than the reusable ESP-NOW adapter used by `apps/node`.
 
 ### Message inbox simulator
 
@@ -169,8 +173,8 @@ The current checkpoint does not include:
 - loading the full `NodeSettings` schema;
 - tests for empty, missing, corrupt, valid, and unsupported stored settings;
 - ESP-NOW peer management;
-- ESP-NOW send and receive callbacks;
-- packet or logical-message I/O through the reusable adapter;
+- ESP-NOW transmission and send-completion handling;
+- received-frame buffering, packet validation, and logical-message delivery through the reusable adapter;
 - a common serialized VaydeNet message contract;
 - finalized protocol identity, message types, capability discovery, or authentication;
 - transport-native nRF24L01, LoRa, Bluetooth, Wi-Fi, or Ethernet adapters;
@@ -178,26 +182,32 @@ The current checkpoint does not include:
 - `VaydeEngine::start()` and the handoff from bootstrap into the engine;
 - an operational node-ready loop;
 - direct hardware capture of the blank-NVS automatic provisioning branch;
-- end-to-end packet reception proof.
+- bidirectional delivery proof and validated VaydeNet message processing.
 
 ## Validation
 
-On August 29, 2026, the milestone source built successfully for both PlatformIO environments:
+On August 30, 2026, the current milestone source built successfully for both node PlatformIO environments:
 
 - `espnow_esp32c5` under ESP-IDF 5.5.4;
 - `espnow_esp32s3` under ESP-IDF 5.5.4.
 
-Both builds compiled and linked the node bootstrap, settings loader, ESP32 NVS storage, board-information component, and ESP-NOW adapter. The C5 image used 40,724 bytes of RAM and 845,900 bytes of flash. The S3 image used 36,488 bytes of RAM and 724,397 bytes of flash.
+Both builds compiled and linked the node bootstrap, settings loader, ESP32 NVS storage, board-information component, and ESP-NOW adapter with the receive callback. The C5 image used 40,724 bytes of RAM and 847,490 bytes of flash. The S3 image used 36,488 bytes of RAM and 725,729 bytes of flash.
 
-After flashing the ESP32-C5, the user reported `Bootstrap ready`. That demonstrates that configured NVS settings were read, the stored ESP-NOW channel passed validation and was applied during transport initialization, Wi-Fi station mode started, and `esp_now_init()` succeeded. It does not directly demonstrate the blank-NVS writer branch because the distinct `Bootstrap ready; default node settings written to NVS` result was not observed. It also does not demonstrate peer registration or packet delivery.
+The standalone sender also built successfully for both `esp32s3_sender` and the new four-megabyte `esp32s3_zero_sender` environment. Each sender image used 43,464 bytes of RAM and 680,241 bytes of flash.
 
-`git diff --check` passed after the implementation and documentation changes.
+After flashing the ESP32-C5, the user reported `Bootstrap ready`. That demonstrates that configured NVS settings were read, the stored ESP-NOW channel passed validation and was applied during transport initialization, Wi-Fi station mode started, `esp_now_init()` succeeded, and the receive callback registered successfully.
+
+On August 30, 2026, the ESP32-C5 serial monitor repeatedly logged `ESPNOW RX sender=3c:0f:02:e5:4f:50 bytes=220` while the separate ESP32-S3 sender was transmitting. This is direct hardware proof that the configured node bootstrap reached an operational ESP-NOW receive callback, that the devices were aligned on a working radio channel, and that 220-byte frames crossed from the sender to the C5. The callback currently logs before interpreting the payload, so this does not prove that the bytes form a valid VaydeNet `Packet`, that CRC or fields are valid, that frames are buffered safely, or that VaydeEngine received a logical message.
+
+The available serial evidence does not directly demonstrate the blank-NVS writer branch because the distinct `Bootstrap ready; default node settings written to NVS` result was not captured after an isolated erase. It also does not demonstrate transmission from the reusable adapter or bidirectional delivery.
+
+The packet-layout syntax check and `git diff --check` passed after the implementation and documentation changes. These builds did not flash either board during this review; the receive-path runtime evidence is the serial capture supplied by the user.
 
 ## Repository State
 
-The active development branch is `agent/esp32-node-bootstrap`. Commit `a612eec` (`Milestone: complete ESP-NOW bootstrap configuration`) is the prior committed bootstrap checkpoint.
+The active development branch is `agent/esp32-node-bootstrap`. Commit `4e48d0b` (`Milestone: add ESP32-C5 support and first-boot NVS provisioning`) is the current committed checkpoint and matches `origin/agent/esp32-node-bootstrap` as of this snapshot.
 
-The next milestone adds the ESP32-C5 target, USB Serial/JTAG logging configuration, the minimal NVS write path, automatic first-boot development defaults, distinct provisioning and write-failure statuses, and updated bootstrap logging.
+The current uncommitted milestone adds ESP-NOW receive-callback registration and sender/length logging to the reusable adapter. It also adds an ESP32-S3 Zero sender environment used for the hardware traffic test and refreshes this status document.
 
 The branch also contains multiple concerns relative to `main`, including node bootstrap work, the ESP-NOW adapter, example configuration, and the message-inbox simulator. Build success does not make the complete branch merge-ready. Scope cleanup, documentation review, focused commits, settings-path testing, and hardware validation remain required before merge.
 
@@ -206,6 +216,7 @@ The branch also contains multiple concerns relative to `main`, including node bo
 1. Erase or isolate the NVS namespace and capture the first-boot `ReadyAfterProvisioning` result, then reboot and capture the stored-settings `Ready` result.
 2. Exercise missing-key, invalid-transport, invalid-channel, valid-settings, NVS-read-failure, and NVS-write-failure paths.
 3. Replace automatic development defaults with an operator-controlled production provisioning contract before deployment.
-4. Add ESP-NOW peer registration and send/receive callbacks behind the adapter boundary.
-5. Define the logical message contract before connecting message I/O to VaydeEngine.
-6. Add `EngineStartupContext` and hand a successfully initialized transport into `VaydeEngine::start()`.
+4. Replace callback-only logging with bounded buffering or queuing, strict frame-length and packet validation, and controlled delivery outside the Wi-Fi callback context.
+5. Add ESP-NOW peer management, transmission, and send-completion handling behind the adapter boundary.
+6. Define the logical message contract before connecting message I/O to VaydeEngine.
+7. Add `EngineStartupContext` and hand a successfully initialized transport into `VaydeEngine::start()`.
