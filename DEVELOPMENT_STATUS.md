@@ -183,7 +183,7 @@ The current checkpoint does not include:
 - a common serialized VaydeNet message contract;
 - finalized protocol identity, message types, capability discovery, or authentication;
 - transport-native nRF24L01, LoRa, Bluetooth, Wi-Fi, or Ethernet adapters;
-- `EngineStartupContext`;
+- construction and use of the declared `EngineStartupContext`;
 - `VaydeEngine::start()` and the handoff from bootstrap into the engine;
 - an operational node-ready loop;
 - direct hardware capture of the blank-NVS automatic provisioning branch;
@@ -212,9 +212,9 @@ On August 31, 2026, the bounded-queue changes built successfully for `espnow_esp
 
 ## Repository State
 
-The active development branch is `agent/esp32-node-bootstrap`. Commit `9225893` (`Milestone: validate ESP-NOW bootstrap reception`) is the current committed checkpoint and matches `origin/agent/esp32-node-bootstrap` as of this snapshot.
+The active development branch is `agent/esp32-node-bootstrap`. Commit `87ef457` (`Milestone: add bounded ESP-NOW receive queue`) is the current committed checkpoint and matches `origin/agent/esp32-node-bootstrap` as of this snapshot.
 
-The current uncommitted milestone adds a four-slot FreeRTOS receive queue, exact 220-byte frame-length enforcement, nonblocking callback-to-queue copying, queue-registration failure cleanup, and adapter-specific `tryReceive(Packet&)` retrieval. The required ESP-Wi-Fi and FreeRTOS component dependencies and this status document are also updated.
+The next startup-context checkpoint declares the minimal `EngineStartupContext` reference bundle for bootstrap-owned board information, node settings, and the selected transport. Bootstrap does not yet construct the context or start VaydeEngine.
 
 The branch also contains multiple concerns relative to `main`, including node bootstrap work, the ESP-NOW adapter, example configuration, and the message-inbox simulator. Build success does not make the complete branch merge-ready. Scope cleanup, documentation review, focused commits, settings-path testing, and hardware validation remain required before merge.
 
@@ -226,4 +226,4 @@ The branch also contains multiple concerns relative to `main`, including node bo
 4. Flash and exercise the bounded queue, then add controlled `tryReceive()` consumption, packet validation, and delivery outside the Wi-Fi callback context.
 5. Add ESP-NOW peer management, transmission, and send-completion handling behind the adapter boundary.
 6. Define the logical message contract before connecting message I/O to VaydeEngine.
-7. Add `EngineStartupContext` and hand a successfully initialized transport into `VaydeEngine::start()`.
+7. Construct the declared `EngineStartupContext` from bootstrap-owned objects and hand the successfully initialized transport into `VaydeEngine::start()`.
