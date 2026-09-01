@@ -1,6 +1,6 @@
 # VaydeNet Development Status
 
-Snapshot: August 31, 2026
+Snapshot: September 1, 2026
 
 VaydeNet is being developed as a hardware-independent communication framework for embedded systems. The intended application boundary remains independent of ESP-NOW, nRF24L01, LoRa, Bluetooth, Wi-Fi, Ethernet, and future transports.
 
@@ -210,11 +210,13 @@ The packet-layout syntax check and `git diff --check` passed after the implement
 
 On August 31, 2026, the bounded-queue changes built successfully for `espnow_esp32c5` and `espnow_esp32s3` under ESP-IDF 5.5.4. The C5 image used 40,732 bytes of RAM and 847,912 bytes of flash; the S3 image used 36,496 bytes of RAM and 726,061 bytes of flash. `git diff --check` also passed. These builds prove compilation and linking of queue creation, callback copying, cleanup, and `tryReceive()`; they do not prove runtime enqueue/dequeue behavior because neither board was flashed for this change.
 
+On September 1, 2026, the minimal `EngineStartupContext` declaration passed a standalone C++17 syntax check, and both node PlatformIO environments built successfully. No node source constructs or includes the context yet, so those firmware builds demonstrate no regression in the existing node targets rather than engine-context integration. No board was flashed for this declaration-only checkpoint.
+
 ## Repository State
 
-The active development branch is `agent/esp32-node-bootstrap`. Commit `87ef457` (`Milestone: add bounded ESP-NOW receive queue`) is the current committed checkpoint and matches `origin/agent/esp32-node-bootstrap` as of this snapshot.
+The active development branch is `agent/esp32-node-bootstrap`. Commit `86b54a2` (`Milestone: declare engine startup context`) is the current committed checkpoint and matches `origin/agent/esp32-node-bootstrap` as of this snapshot.
 
-The next startup-context checkpoint declares the minimal `EngineStartupContext` reference bundle for bootstrap-owned board information, node settings, and the selected transport. Bootstrap does not yet construct the context or start VaydeEngine.
+That checkpoint declares the minimal `EngineStartupContext` reference bundle for bootstrap-owned board information, node settings, and the selected transport. Bootstrap does not yet construct the context or start VaydeEngine.
 
 The branch also contains multiple concerns relative to `main`, including node bootstrap work, the ESP-NOW adapter, example configuration, and the message-inbox simulator. Build success does not make the complete branch merge-ready. Scope cleanup, documentation review, focused commits, settings-path testing, and hardware validation remain required before merge.
 
