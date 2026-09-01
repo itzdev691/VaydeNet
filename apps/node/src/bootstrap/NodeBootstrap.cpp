@@ -4,7 +4,7 @@
 NodeBootstrapStatus NodeBootstrap::run() {
     // Startup dependencies will be assembled here.
     const BoardInfoStatus status =
-        retrieveBoardInformation(board_information_);
+        retrieveEsp32HardwareIdentity(board_information_);
 
     if (status != BoardInfoStatus::Ok) {
         return NodeBootstrapStatus::BoardInformationFailed;

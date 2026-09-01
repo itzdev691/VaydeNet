@@ -14,12 +14,12 @@ enum class BoardInfoStatus : std::uint8_t {
     MissingBoardModel,
 };
 
-BoardInfoStatus readDeviceUid(
+BoardInfoStatus readEsp32DeviceUid(
     std::array<std::uint8_t, 6>& outputUid
 );
 
-const char* getBoardModel();
+const char* getEsp32BoardModel();
 
-BoardInfoStatus retrieveBoardInformation(
+BoardInfoStatus retrieveEsp32HardwareIdentity(
     BoardInformation& output
 );

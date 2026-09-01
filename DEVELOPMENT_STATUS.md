@@ -13,7 +13,7 @@ The current node application follows this path:
 ```text
 ESP-IDF app_main()
     -> NodeBootstrap::run()
-    -> retrieveBoardInformation()
+    -> retrieveEsp32HardwareIdentity()
     -> initializeNodeSettingsStorage()
     -> readNodeSettingsFromStorage()
     -> if empty, write development defaults to NVS

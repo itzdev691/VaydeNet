@@ -6,7 +6,7 @@
 #error "VAYDENET_BOARD_MODEL must be defined by board configuration"
 #endif
 
-BoardInfoStatus readDeviceUid(
+BoardInfoStatus readEsp32DeviceUid(
     std::array<std::uint8_t, 6>& outputUid
 ) {
     const esp_err_t result =
@@ -19,20 +19,21 @@ BoardInfoStatus readDeviceUid(
     return BoardInfoStatus::Ok;
 }
 
-const char* getBoardModel() {
+const char* getEsp32BoardModel() {
     return VAYDENET_BOARD_MODEL;
 }
 
-BoardInfoStatus retrieveBoardInformation(
+BoardInfoStatus retrieveEsp32HardwareIdentity(
     BoardInformation& output
 ) {
-    const BoardInfoStatus uidStatus = readDeviceUid(output.device_uid);
+    const BoardInfoStatus uidStatus =
+        readEsp32DeviceUid(output.device_uid);
 
     if (uidStatus != BoardInfoStatus::Ok) {
         return uidStatus;
     }
 
-    output.board_model = getBoardModel();
+    output.board_model = getEsp32BoardModel();
 
     if (output.board_model == nullptr || output.board_model[0] == '\0') {
         return BoardInfoStatus::MissingBoardModel;
