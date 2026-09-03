@@ -4,28 +4,28 @@
 
 #include "VaydeNet/config/NodeSettings.h"
 
-enum class SettingsStorageInitializationStatus : std::uint8_t {
+enum class Esp32SettingsStorageInitializationStatus : std::uint8_t {
     Ok,
     Failed
 };
 
-enum class SettingsStorageStatus : std::uint8_t {
+enum class Esp32SettingsStorageReadStatus : std::uint8_t {
     Configured,
     NotConfigured,
     ReadFailed
 };
 
-enum class SettingsStorageWriteStatus : std::uint8_t {
+enum class Esp32SettingsStorageWriteStatus : std::uint8_t {
     Ok,
     WriteFailed
 };
 
-SettingsStorageInitializationStatus initializeNodeSettingsStorage();
+Esp32SettingsStorageInitializationStatus initializeEsp32NodeSettingsStorage();
 
-SettingsStorageStatus readNodeSettingsFromStorage(
+Esp32SettingsStorageReadStatus readEsp32NodeSettingsFromStorage(
     NodeSettings& settings
 );
 
-SettingsStorageWriteStatus writeNodeSettingsToStorage(
+Esp32SettingsStorageWriteStatus writeEsp32NodeSettingsToStorage(
     const NodeSettings& settings
 );

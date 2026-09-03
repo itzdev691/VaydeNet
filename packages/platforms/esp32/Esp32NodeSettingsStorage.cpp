@@ -10,7 +10,7 @@ constexpr char kConfiguredKey[] = "configured";
 constexpr char kTransportKey[] = "transport";
 constexpr char kChannelKey[] = "channel";
 
-SettingsStorageStatus checkConfigured(
+Esp32SettingsStorageReadStatus checkEsp32SettingsConfigured(
     nvs_handle_t handle
 ) {
     std::uint8_t configured = 0;
@@ -23,31 +23,31 @@ SettingsStorageStatus checkConfigured(
         );
 
     if (result == ESP_ERR_NVS_NOT_FOUND) {
-        return SettingsStorageStatus::NotConfigured;
+        return Esp32SettingsStorageReadStatus::NotConfigured;
     }
 
     if (result != ESP_OK) {
-        return SettingsStorageStatus::ReadFailed;
+        return Esp32SettingsStorageReadStatus::ReadFailed;
     }
 
     if (configured != 1) {
-        return SettingsStorageStatus::NotConfigured;
+        return Esp32SettingsStorageReadStatus::NotConfigured;
     }
 
-    return SettingsStorageStatus::Configured;
+    return Esp32SettingsStorageReadStatus::Configured;
 }
 
 }  // namespace
 
-SettingsStorageInitializationStatus initializeNodeSettingsStorage() {
+Esp32SettingsStorageInitializationStatus initializeEsp32NodeSettingsStorage() {
     if (nvs_flash_init() != ESP_OK) {
-        return SettingsStorageInitializationStatus::Failed;
+        return Esp32SettingsStorageInitializationStatus::Failed;
     }
 
-    return SettingsStorageInitializationStatus::Ok;
+    return Esp32SettingsStorageInitializationStatus::Ok;
 }
 
-SettingsStorageStatus readNodeSettingsFromStorage(
+Esp32SettingsStorageReadStatus readEsp32NodeSettingsFromStorage(
     NodeSettings& settings
 ) {
     nvs_handle_t handle{};
@@ -60,17 +60,17 @@ SettingsStorageStatus readNodeSettingsFromStorage(
         );
 
     if (open_result == ESP_ERR_NVS_NOT_FOUND) {
-        return SettingsStorageStatus::NotConfigured;
+        return Esp32SettingsStorageReadStatus::NotConfigured;
     }
 
     if (open_result != ESP_OK) {
-        return SettingsStorageStatus::ReadFailed;
+        return Esp32SettingsStorageReadStatus::ReadFailed;
     }
 
-    const SettingsStorageStatus configured_status =
-        checkConfigured(handle);
+    const Esp32SettingsStorageReadStatus configured_status =
+        checkEsp32SettingsConfigured(handle);
 
-    if (configured_status != SettingsStorageStatus::Configured) {
+    if (configured_status != Esp32SettingsStorageReadStatus::Configured) {
         nvs_close(handle);
         return configured_status;
     }
@@ -87,7 +87,7 @@ SettingsStorageStatus readNodeSettingsFromStorage(
 
     if (transport_result != ESP_OK) {
         nvs_close(handle);
-        return SettingsStorageStatus::ReadFailed;
+        return Esp32SettingsStorageReadStatus::ReadFailed;
     }
 
     if (
@@ -97,7 +97,7 @@ SettingsStorageStatus readNodeSettingsFromStorage(
             static_cast<std::uint8_t>(TransportType::Ethernet)
     ) {
         nvs_close(handle);
-        return SettingsStorageStatus::ReadFailed;
+        return Esp32SettingsStorageReadStatus::ReadFailed;
     }
 
     candidate.transport =
@@ -112,17 +112,17 @@ SettingsStorageStatus readNodeSettingsFromStorage(
 
     if (channel_result != ESP_OK) {
         nvs_close(handle);
-        return SettingsStorageStatus::ReadFailed;
+        return Esp32SettingsStorageReadStatus::ReadFailed;
     }
 
     nvs_close(handle);
 
     settings = candidate;
 
-    return SettingsStorageStatus::Configured;
+    return Esp32SettingsStorageReadStatus::Configured;
 }
 
-SettingsStorageWriteStatus writeNodeSettingsToStorage(
+Esp32SettingsStorageWriteStatus writeEsp32NodeSettingsToStorage(
     const NodeSettings& settings
 ) {
     const std::uint8_t stored_transport =
@@ -134,7 +134,7 @@ SettingsStorageWriteStatus writeNodeSettingsToStorage(
         stored_transport >
             static_cast<std::uint8_t>(TransportType::Ethernet)
     ) {
-        return SettingsStorageWriteStatus::WriteFailed;
+        return Esp32SettingsStorageWriteStatus::WriteFailed;
     }
 
     nvs_handle_t handle{};
@@ -147,7 +147,7 @@ SettingsStorageWriteStatus writeNodeSettingsToStorage(
         );
 
     if (open_result != ESP_OK) {
-        return SettingsStorageWriteStatus::WriteFailed;
+        return Esp32SettingsStorageWriteStatus::WriteFailed;
     }
 
     const esp_err_t transport_result =
@@ -159,7 +159,7 @@ SettingsStorageWriteStatus writeNodeSettingsToStorage(
 
     if (transport_result != ESP_OK) {
         nvs_close(handle);
-        return SettingsStorageWriteStatus::WriteFailed;
+        return Esp32SettingsStorageWriteStatus::WriteFailed;
     }
 
     const esp_err_t channel_result =
@@ -171,7 +171,7 @@ SettingsStorageWriteStatus writeNodeSettingsToStorage(
 
     if (channel_result != ESP_OK) {
         nvs_close(handle);
-        return SettingsStorageWriteStatus::WriteFailed;
+        return Esp32SettingsStorageWriteStatus::WriteFailed;
     }
 
     const esp_err_t configured_result =
@@ -183,7 +183,7 @@ SettingsStorageWriteStatus writeNodeSettingsToStorage(
 
     if (configured_result != ESP_OK) {
         nvs_close(handle);
-        return SettingsStorageWriteStatus::WriteFailed;
+        return Esp32SettingsStorageWriteStatus::WriteFailed;
     }
 
     const esp_err_t commit_result =
@@ -192,8 +192,8 @@ SettingsStorageWriteStatus writeNodeSettingsToStorage(
     nvs_close(handle);
 
     if (commit_result != ESP_OK) {
-        return SettingsStorageWriteStatus::WriteFailed;
+        return Esp32SettingsStorageWriteStatus::WriteFailed;
     }
 
-    return SettingsStorageWriteStatus::Ok;
+    return Esp32SettingsStorageWriteStatus::Ok;
 }

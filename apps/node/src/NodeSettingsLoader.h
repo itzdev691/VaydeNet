@@ -2,8 +2,8 @@
 
 #include <cstdint>
 
-#include "Esp32BoardInfo.h"
 #include "VaydeNet/config/NodeSettings.h"
+#include "VaydeNet/startup/HardwareIdentity.h"
 
 enum class NodeSettingsLoadStatus : std::uint8_t {
     Ok,
@@ -13,6 +13,6 @@ enum class NodeSettingsLoadStatus : std::uint8_t {
 };
 
 NodeSettingsLoadStatus loadNodeSettings(
-    const BoardInformation& board_information,
+    const HardwareIdentity& hardware_identity,
     NodeSettings& output
 );

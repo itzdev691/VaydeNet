@@ -1,11 +1,11 @@
 #pragma once
 
-struct BoardInformation;
+struct HardwareIdentity;
 struct NodeSettings;
 class TransportInterface;
 
 struct EngineStartupContext {
-    const BoardInformation& identity;
+    const HardwareIdentity& identity;
     const NodeSettings& settings;
     TransportInterface& transport;
 };

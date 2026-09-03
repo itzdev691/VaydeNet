@@ -8,7 +8,8 @@
 #include "VaydeNet/packet/Packet.h"
 #include "VaydeNet/transport/TransportInterface.h"
 
-enum class TransportReceiveStatus : std::uint8_t {
+using EspNowReceiveActivityCallback = void (*)(void* context);
+enum class EspNowReceiveStatus : std::uint8_t {
     Received,
     Empty,
     NotInitialized
@@ -18,7 +19,12 @@ class EspNowTransport final : public TransportInterface {
 public:
     bool configureChannel(std::uint16_t channel);
     TransportStatus initialize() override;
-    TransportReceiveStatus tryReceive(Packet& packet);
+    EspNowReceiveStatus tryReceive(Packet& packet);
+
+    void setReceiveActivityCallback(
+        EspNowReceiveActivityCallback callback,
+        void* context
+    );
 
 private:
     static void onDataReceived(
@@ -35,6 +41,9 @@ private:
     static EspNowTransport* active_instance_;
 
     QueueHandle_t receive_queue_{nullptr};
+    EspNowReceiveActivityCallback receive_activity_callback_{nullptr};
+    void* receive_activity_context_{nullptr};
     std::uint8_t channel_{};
     bool initialized_{false};
+
 };

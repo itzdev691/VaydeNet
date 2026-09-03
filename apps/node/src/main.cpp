@@ -30,8 +30,8 @@ extern "C" void app_main() {
             );
             return;
 
-        case NodeBootstrapStatus::BoardInformationFailed:
-            ESP_LOGE(kLogTag, "Board information retrieval failed");
+        case NodeBootstrapStatus::HardwareIdentityFailed:
+            ESP_LOGE(kLogTag, "Hardware identity retrieval failed");
             return;
 
         case NodeBootstrapStatus::SettingsReadFailed:

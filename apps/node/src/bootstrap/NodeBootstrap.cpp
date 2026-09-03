@@ -1,17 +1,26 @@
 #include "bootstrap/NodeBootstrap.h"
 #include "NodeSettingsLoader.h"
+#ifndef VAYDENET_ACTIVITY_LED_GPIO
+#error "VAYDENET_ACTIVITY_LED_GPIO must be defined"
+#endif
+
+void NodeBootstrap::indicatePacketReceived(void* context) {
+    if (context != nullptr) {
+        static_cast<Esp32RgbLed*>(context)->flash();
+    }
+}
 
 NodeBootstrapStatus NodeBootstrap::run() {
     // Startup dependencies will be assembled here.
-    const BoardInfoStatus status =
-        retrieveEsp32HardwareIdentity(board_information_);
+    const Esp32BoardInfoStatus status =
+        retrieveEsp32HardwareIdentity(hardware_identity_);
 
-    if (status != BoardInfoStatus::Ok) {
-        return NodeBootstrapStatus::BoardInformationFailed;
+    if (status != Esp32BoardInfoStatus::Ok) {
+        return NodeBootstrapStatus::HardwareIdentityFailed;
     }
 
     const NodeSettingsLoadStatus settings_status =
-        loadNodeSettings(board_information_, node_settings_);
+        loadNodeSettings(hardware_identity_, node_settings_);
 
     const bool settings_were_provisioned =
         settings_status == NodeSettingsLoadStatus::Provisioned;
@@ -39,6 +48,17 @@ NodeBootstrapStatus NodeBootstrap::run() {
         case TransportType::Ethernet:
         case TransportType::Unspecified:
             return NodeBootstrapStatus::UnsupportedTransport;
+    }
+
+    if (
+        packet_activity_led_.initialize(
+            VAYDENET_ACTIVITY_LED_GPIO
+        )
+    ) {
+        esp_now_transport_.setReceiveActivityCallback(
+            NodeBootstrap::indicatePacketReceived,
+            &packet_activity_led_
+        );
     }
 
     const TransportStatus transport_status =

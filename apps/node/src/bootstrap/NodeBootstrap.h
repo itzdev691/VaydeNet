@@ -6,11 +6,12 @@
 #include "VaydeNet/config/NodeSettings.h"
 #include "EspNowTransport.h"
 #include "VaydeNet/transport/TransportInterface.h"
+#include "Esp32RgbLed.h"
 
 enum class NodeBootstrapStatus : std::uint8_t {
     Ready,
     ReadyAfterProvisioning,
-    BoardInformationFailed,
+    HardwareIdentityFailed,
     SettingsReadFailed,
     SettingsWriteFailed,
     UnsupportedTransport,
@@ -22,11 +23,12 @@ class NodeBootstrap {
 public:
     NodeBootstrapStatus run();
 
-
 private:
-    BoardInformation board_information_{};
+    HardwareIdentity hardware_identity_{};
     NodeSettings node_settings_{};
+    static void indicatePacketReceived(void* context);
 
+    Esp32RgbLed packet_activity_led_{};
     EspNowTransport esp_now_transport_{};
     TransportInterface* selected_transport_{nullptr};
 };

@@ -21,6 +21,14 @@ constexpr char kLogTag[] = "EspNowTransport";
 
 EspNowTransport* EspNowTransport::active_instance_ = nullptr;
 
+void EspNowTransport::setReceiveActivityCallback(
+    EspNowReceiveActivityCallback callback,
+    void* context
+) {
+    receive_activity_callback_ = callback;
+    receive_activity_context_ = context;
+}
+
 void EspNowTransport::onDataReceived(
     const esp_now_recv_info_t* receive_info,
     const std::uint8_t* data,
@@ -66,6 +74,10 @@ void EspNowTransport::enqueueReceivedData(
 
     Packet packet{};
     std::memcpy(&packet, data, sizeof(packet));
+
+    if (receive_activity_callback_ != nullptr) {
+        receive_activity_callback_(receive_activity_context_);
+    }
 
     if (xQueueSend(receive_queue_, &packet, 0) != pdTRUE) {
         ESP_LOGW(kLogTag, "Receive queue full; packet dropped");
@@ -166,14 +178,14 @@ TransportStatus EspNowTransport::initialize() {
     return TransportStatus::Ok;
 }
 
-TransportReceiveStatus EspNowTransport::tryReceive(Packet& packet) {
+EspNowReceiveStatus EspNowTransport::tryReceive(Packet& packet) {
     if (!initialized_ || receive_queue_ == nullptr) {
-        return TransportReceiveStatus::NotInitialized;
+        return EspNowReceiveStatus::NotInitialized;
     }
 
     if (xQueueReceive(receive_queue_, &packet, 0) != pdTRUE) {
-        return TransportReceiveStatus::Empty;
+        return EspNowReceiveStatus::Empty;
     }
 
-    return TransportReceiveStatus::Received;
+    return EspNowReceiveStatus::Received;
 }

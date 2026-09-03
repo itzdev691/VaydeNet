@@ -15,34 +15,34 @@ NodeSettings createDefaultNodeSettings() {
 }  // namespace
 
 NodeSettingsLoadStatus loadNodeSettings(
-    const BoardInformation&,
+    const HardwareIdentity&,
     NodeSettings& settings
 ) {
-    const SettingsStorageInitializationStatus initialization_status =
-        initializeNodeSettingsStorage();
+    const Esp32SettingsStorageInitializationStatus initialization_status =
+        initializeEsp32NodeSettingsStorage();
 
     if (
         initialization_status !=
-        SettingsStorageInitializationStatus::Ok
+        Esp32SettingsStorageInitializationStatus::Ok
     ) {
         return NodeSettingsLoadStatus::ReadFailed;
     }
 
-    const SettingsStorageStatus storage_status =
-        readNodeSettingsFromStorage(settings);
+    const Esp32SettingsStorageReadStatus storage_status =
+        readEsp32NodeSettingsFromStorage(settings);
 
     switch (storage_status) {
-        case SettingsStorageStatus::Configured:
+        case Esp32SettingsStorageReadStatus::Configured:
             return NodeSettingsLoadStatus::Ok;
 
-        case SettingsStorageStatus::NotConfigured: {
+        case Esp32SettingsStorageReadStatus::NotConfigured: {
             NodeSettings initial_settings =
                 createDefaultNodeSettings();
 
-            const SettingsStorageWriteStatus write_status =
-                writeNodeSettingsToStorage(initial_settings);
+            const Esp32SettingsStorageWriteStatus write_status =
+                writeEsp32NodeSettingsToStorage(initial_settings);
 
-            if (write_status != SettingsStorageWriteStatus::Ok) {
+            if (write_status != Esp32SettingsStorageWriteStatus::Ok) {
                 return NodeSettingsLoadStatus::WriteFailed;
             }
 
@@ -50,7 +50,7 @@ NodeSettingsLoadStatus loadNodeSettings(
             return NodeSettingsLoadStatus::Provisioned;
         }
 
-        case SettingsStorageStatus::ReadFailed:
+        case Esp32SettingsStorageReadStatus::ReadFailed:
             return NodeSettingsLoadStatus::ReadFailed;
     }
 

@@ -13,6 +13,7 @@ __pycache__/
 
 # PlatformIO and compiled output
 .pio/
+managed_components/
 build/
 dist/
 compile_commands.json
