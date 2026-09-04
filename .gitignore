@@ -27,3 +27,4 @@ compile_commands.json
 !/apps/examples/wt32-eth01/ethernet-smoke/.vscode/
 !/apps/examples/wt32-eth01/ethernet-smoke/.vscode/settings.json
 apps/node/sdkconfig.espnow_esp32s3
+apps/node/sdkconfig-s3-mini.defaults
