@@ -7,6 +7,7 @@ idf_component_register(
         "."
         "../../../packages/VaydeEngine/include"
     REQUIRES
+        VaydeEngine
         esp32
         esp-now
 )

@@ -53,6 +53,10 @@ extern "C" void app_main() {
         case NodeBootstrapStatus::TransportInitializationFailed:
             ESP_LOGE(kLogTag, "Transport initialization failed");
             return;
+
+        case NodeBootstrapStatus::EngineStartupFailed:
+            ESP_LOGE(kLogTag, "VaydeEngine startup failed");
+            return;
     }
 
     ESP_LOGE(kLogTag, "Bootstrap returned an unknown status");

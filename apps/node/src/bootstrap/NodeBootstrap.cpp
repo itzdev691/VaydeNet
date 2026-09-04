@@ -1,5 +1,7 @@
 #include "bootstrap/NodeBootstrap.h"
 #include "NodeSettingsLoader.h"
+#include "VaydeNet/startup/EngineStartupContext.h"
+
 #ifndef VAYDENET_ACTIVITY_LED_GPIO
 #error "VAYDENET_ACTIVITY_LED_GPIO must be defined"
 #endif
@@ -68,8 +70,18 @@ NodeBootstrapStatus NodeBootstrap::run() {
         return NodeBootstrapStatus::TransportInitializationFailed;
     }
 
-    // ESP-NOW should be initialized
-    // VaydeEngine handoff will be here.
+    EngineStartupContext engine_startup_context{
+        hardware_identity_,
+        node_settings_,
+        *selected_transport_
+    };
+
+    const EngineStartStatus engine_start_status =
+        vayde_engine_.start(engine_startup_context);
+
+    if (engine_start_status != EngineStartStatus::Ok) {
+        return NodeBootstrapStatus::EngineStartupFailed;
+    }
 
     if (settings_were_provisioned) {
         return NodeBootstrapStatus::ReadyAfterProvisioning;

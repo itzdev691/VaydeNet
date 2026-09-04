@@ -7,6 +7,7 @@
 #include "EspNowTransport.h"
 #include "VaydeNet/transport/TransportInterface.h"
 #include "Esp32RgbLed.h"
+#include "VaydeNet/VaydeEngine.h"
 
 enum class NodeBootstrapStatus : std::uint8_t {
     Ready,
@@ -16,7 +17,8 @@ enum class NodeBootstrapStatus : std::uint8_t {
     SettingsWriteFailed,
     UnsupportedTransport,
     InvalidTransportConfiguration,
-    TransportInitializationFailed
+    TransportInitializationFailed,
+    EngineStartupFailed
 };
 
 class NodeBootstrap {
@@ -31,4 +33,6 @@ private:
     Esp32RgbLed packet_activity_led_{};
     EspNowTransport esp_now_transport_{};
     TransportInterface* selected_transport_{nullptr};
+
+    VaydeEngine vayde_engine_{};
 };
