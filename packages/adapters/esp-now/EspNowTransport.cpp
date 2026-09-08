@@ -178,14 +178,14 @@ TransportStatus EspNowTransport::initialize() {
     return TransportStatus::Ok;
 }
 
-EspNowReceiveStatus EspNowTransport::tryReceive(Packet& packet) {
+TransportReceiveStatus EspNowTransport::tryReceive(Packet& packet) {
     if (!initialized_ || receive_queue_ == nullptr) {
-        return EspNowReceiveStatus::NotInitialized;
+        return TransportReceiveStatus::NotInitialized;
     }
 
     if (xQueueReceive(receive_queue_, &packet, 0) != pdTRUE) {
-        return EspNowReceiveStatus::Empty;
+        return TransportReceiveStatus::Empty;
     }
 
-    return EspNowReceiveStatus::Received;
+    return TransportReceiveStatus::Received;
 }

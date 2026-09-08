@@ -1,6 +1,8 @@
 # VaydeNet Development Status
 
-Snapshot: September 3, 2026
+Snapshot: September 8, 2026
+
+Target bootstrap-branch completion: September 18, 2026
 
 VaydeNet is being developed as a hardware-independent communication framework for embedded systems. The intended application boundary remains independent of ESP-NOW, nRF24L01, LoRa, Bluetooth, Wi-Fi, Ethernet, and future transports.
 
@@ -108,15 +110,16 @@ Only `transport` and `channel` are stored and loaded. Node ID, network ID, versi
 
 ### Transport boundary
 
-`packages/VaydeEngine/include/VaydeNet/transport/TransportInterface.h` currently defines a portable initialization contract only:
+`packages/VaydeEngine/include/VaydeNet/transport/TransportInterface.h` defines portable initialization and nonblocking receive contracts:
 
 ```text
 TransportInterface::initialize() -> TransportStatus
+TransportInterface::tryReceive(Packet&) -> TransportReceiveStatus
 ```
 
-It does not yet define send, receive, addressing, discovery, callbacks, or message delivery into VaydeEngine.
+`TransportReceiveStatus` distinguishes `Received`, `Empty`, and `NotInitialized`. The contract includes the current `Packet` prototype directly so every adapter implementation uses the same complete type.
 
-`EspNowTransport` now exposes an adapter-specific nonblocking `tryReceive(Packet&)` method, but that method is not yet part of `TransportInterface`. The portable receive contract and its VaydeEngine consumer remain undefined.
+`EspNowTransport` overrides this method and translates its FreeRTOS queue result into the portable status. Queue ownership, callback registration, and ESP-NOW-specific buffering remain private to the adapter. A VaydeEngine consumer is not yet implemented.
 
 ### VaydeEngine startup handoff
 
@@ -204,7 +207,7 @@ The current checkpoint does not include:
 - tests for empty, missing, corrupt, valid, and unsupported stored settings;
 - ESP-NOW peer management;
 - ESP-NOW transmission and send-completion handling;
-- a portable receive method on `TransportInterface`, consumption and hardware validation of the new queue, packet validation, and logical-message delivery through the reusable adapter;
+- consumption and hardware validation of the new queue, packet validation, and logical-message delivery through the portable receive contract;
 - a common serialized VaydeNet message contract;
 - finalized protocol identity, message types, capability discovery, or authentication;
 - transport-native nRF24L01, LoRa, Bluetooth, Wi-Fi, or Ethernet adapters;
@@ -240,9 +243,13 @@ On September 2, 2026, the current source built successfully for `espnow_esp32s3`
 
 On September 3, 2026, the `espnow_esp32s3_mini` node environment built successfully with the new VaydeEngine component registration and active bootstrap handoff. The build compiled `main.cpp`, `NodeBootstrap.cpp`, and `VaydeEngine.cpp`, archived `libVaydeEngine.a`, and linked the firmware. The image used 36,712 bytes of RAM and 739,449 bytes of flash. `git diff --check` passed. No firmware was flashed, so this proves compilation and linking of the handoff but not runtime execution, packet consumption, or engine processing.
 
+On September 8, 2026, the portable receive-contract translation built successfully for the `espnow_esp32s3_mini` node environment under ESP-IDF 5.5.4. The image used 36,712 bytes of RAM and 739,497 bytes of flash. `git diff --check` passed, and no `EspNowReceiveStatus` references remained. No firmware was flashed, so this proves that `TransportInterface` and `EspNowTransport` compile and link with the shared `TransportReceiveStatus`; it does not prove runtime queue dequeue, packet validation, or engine delivery.
+
+On September 8, 2026, a host regression test compiled the production `EspNowTransport.cpp` against deterministic ESP-IDF and FreeRTOS fakes, then drove the registered ESP-NOW callback. Address and undefined-behavior sanitizers passed while the test verified exact-size rejection, owned frame copies, FIFO order, four-frame capacity, full-queue dropping, and nonblocking `NotInitialized`, `Empty`, and `Received` results. A clean `espnow_esp32s3_mini` firmware rebuild also passed with 36,712 bytes of RAM and 739,497 bytes of flash. This is deterministic software verification of the adapter logic; it is not physical radio, ESP-IDF scheduler, or hardware enqueue/dequeue proof.
+
 ## Repository State
 
-The active development branch is `agent/esp32-node-bootstrap`. At this pre-commit snapshot, local HEAD is `364cebe` (`add s3 to platformio config`) and matches `origin/agent/esp32-node-bootstrap`. The VaydeEngine component registration, startup validation, bootstrap handoff, failure reporting, and this documentation update remain unstaged and uncommitted.
+The active development branch is `agent/esp32-node-bootstrap`. The September 8 checkpoint adds the portable receive contract, ESP-NOW adapter translation, and host receive-queue regression test. The generated `apps/node/dependencies.lock` target change remains excluded pending a stable multi-target lock policy.
 
 `EngineStartupContext` is now constructed from bootstrap-owned hardware identity, node settings, and the selected initialized transport. `VaydeEngine::start()` validates and retains those dependencies. No engine processing task or packet consumer exists yet.
 

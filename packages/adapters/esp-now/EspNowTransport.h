@@ -9,17 +9,12 @@
 #include "VaydeNet/transport/TransportInterface.h"
 
 using EspNowReceiveActivityCallback = void (*)(void* context);
-enum class EspNowReceiveStatus : std::uint8_t {
-    Received,
-    Empty,
-    NotInitialized
-};
 
 class EspNowTransport final : public TransportInterface {
 public:
     bool configureChannel(std::uint16_t channel);
     TransportStatus initialize() override;
-    EspNowReceiveStatus tryReceive(Packet& packet);
+    TransportReceiveStatus tryReceive(Packet& packet) override;
 
     void setReceiveActivityCallback(
         EspNowReceiveActivityCallback callback,
