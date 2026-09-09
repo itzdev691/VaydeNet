@@ -1,7 +1,9 @@
 #include "VaydeNet/VaydeEngine.h"
 #include "VaydeNet/config/NodeSettings.h"
+#include "VaydeNet/packet/Packet.h"
 #include "VaydeNet/startup/HardwareIdentity.h"
 #include "VaydeNet/startup/EngineStartupContext.h"
+#include "VaydeNet/transport/TransportInterface.h"
 
 namespace {
 
@@ -46,4 +48,29 @@ EngineStartStatus VaydeEngine::start(
     started_ = true;
 
     return EngineStartStatus::Ok;
+}
+
+EngineReceiveStatus VaydeEngine::consumeNextPacket() {
+    if (!started_) {
+        return EngineReceiveStatus::NotStarted;
+    }
+
+    if (transport_ == nullptr) {
+        return EngineReceiveStatus::TransportNotReady;
+    }
+
+    Packet packet{};
+
+    switch (transport_->tryReceive(packet)) {
+        case TransportReceiveStatus::Received:
+            return EngineReceiveStatus::PacketDequeued;
+
+        case TransportReceiveStatus::Empty:
+            return EngineReceiveStatus::QueueEmpty;
+
+        case TransportReceiveStatus::NotInitialized:
+            return EngineReceiveStatus::TransportNotReady;
+    }
+
+    return EngineReceiveStatus::TransportNotReady;
 }

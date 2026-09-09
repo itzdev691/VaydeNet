@@ -1,5 +1,7 @@
 #include "bootstrap/NodeBootstrap.h"
 
+#include <cstdint>
+
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -7,6 +9,38 @@
 namespace {
 
 constexpr char kLogTag[] = "NodeBootstrap";
+constexpr std::uint32_t kReceivePollIntervalMs = 10;
+
+void runReceiveConsumer(NodeBootstrap& bootstrap) {
+    ESP_LOGI(kLogTag, "VaydeEngine receive consumer started");
+
+    while (true) {
+        switch (bootstrap.consumeNextPacket()) {
+            case EngineReceiveStatus::PacketDequeued:
+                ESP_LOGI(
+                    kLogTag,
+                    "VaydeEngine dequeued an unvalidated frame"
+                );
+                break;
+
+            case EngineReceiveStatus::QueueEmpty:
+                break;
+
+            case EngineReceiveStatus::NotStarted:
+                ESP_LOGE(kLogTag, "VaydeEngine is not started");
+                return;
+
+            case EngineReceiveStatus::TransportNotReady:
+                ESP_LOGE(
+                    kLogTag,
+                    "VaydeEngine receive transport is not ready"
+                );
+                return;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(kReceivePollIntervalMs));
+    }
+}
 
 }  // namespace
 
@@ -21,14 +55,14 @@ extern "C" void app_main() {
     switch (status) {
         case NodeBootstrapStatus::Ready:
             ESP_LOGI(kLogTag, "Bootstrap ready");
-            return;
+            break;
 
         case NodeBootstrapStatus::ReadyAfterProvisioning:
             ESP_LOGI(
                 kLogTag,
                 "Bootstrap ready; default node settings written to NVS"
             );
-            return;
+            break;
 
         case NodeBootstrapStatus::HardwareIdentityFailed:
             ESP_LOGE(kLogTag, "Hardware identity retrieval failed");
@@ -57,7 +91,11 @@ extern "C" void app_main() {
         case NodeBootstrapStatus::EngineStartupFailed:
             ESP_LOGE(kLogTag, "VaydeEngine startup failed");
             return;
+
+        default:
+            ESP_LOGE(kLogTag, "Bootstrap returned an unknown status");
+            return;
     }
 
-    ESP_LOGE(kLogTag, "Bootstrap returned an unknown status");
+    runReceiveConsumer(bootstrap);
 }

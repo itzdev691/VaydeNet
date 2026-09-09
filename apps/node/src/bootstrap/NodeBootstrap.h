@@ -24,6 +24,7 @@ enum class NodeBootstrapStatus : std::uint8_t {
 class NodeBootstrap {
 public:
     NodeBootstrapStatus run();
+    EngineReceiveStatus consumeNextPacket();
 
 private:
     HardwareIdentity hardware_identity_{};

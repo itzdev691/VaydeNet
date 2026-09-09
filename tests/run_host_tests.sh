@@ -26,6 +26,14 @@ echo "PASS: Packet layout"
 
 "$cxx" \
     "${common_flags[@]}" \
+    -I"$repo_root/packages/VaydeEngine/include" \
+    "$repo_root/packages/VaydeEngine/src/VaydeEngine.cpp" \
+    "$repo_root/tests/unit/vayde_engine_receive_consumer_test.cpp" \
+    -o "$test_build_dir/vayde_engine_receive_consumer_test"
+"$test_build_dir/vayde_engine_receive_consumer_test"
+
+"$cxx" \
+    "${common_flags[@]}" \
     -I"$repo_root/tests/mocks/esp-idf" \
     -I"$repo_root/packages/adapters/esp-now" \
     -I"$repo_root/packages/VaydeEngine/include" \

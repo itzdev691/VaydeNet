@@ -89,3 +89,7 @@ NodeBootstrapStatus NodeBootstrap::run() {
 
     return NodeBootstrapStatus::Ready;
 }
+
+EngineReceiveStatus NodeBootstrap::consumeNextPacket() {
+    return vayde_engine_.consumeNextPacket();
+}

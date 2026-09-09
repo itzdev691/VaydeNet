@@ -6,7 +6,7 @@ Target bootstrap-branch completion: September 18, 2026
 
 VaydeNet is being developed as a hardware-independent communication framework for embedded systems. The intended application boundary remains independent of ESP-NOW, nRF24L01, LoRa, Bluetooth, Wi-Fi, Ethernet, and future transports.
 
-The active implementation checkpoint is the ESP32 node bootstrap. It can retrieve hardware identity, read a minimal configuration from NVS, select ESP-NOW, initialize a board-specific packet activity LED, apply the configured Wi-Fi channel, initialize ESP-NOW, register a receive callback, log incoming frame metadata, request an LED flash for each exact-sized `Packet` frame, copy that frame into a bounded four-slot FreeRTOS queue, construct an `EngineStartupContext`, hand the initialized dependencies to `VaydeEngine::start()`, and report a specific startup result. VaydeEngine currently validates and retains those dependencies but does not launch packet processing. The node does not yet consume or validate queued packets or exchange validated application messages through the reusable adapter.
+The active implementation checkpoint is the ESP32 node bootstrap. It can retrieve hardware identity, read a minimal configuration from NVS, select ESP-NOW, initialize a board-specific packet activity LED, apply the configured Wi-Fi channel, initialize ESP-NOW, register a receive callback, log incoming frame metadata, request an LED flash for each exact-sized `Packet` frame, copy that frame into a bounded four-slot FreeRTOS queue, construct an `EngineStartupContext`, hand the initialized dependencies to `VaydeEngine::start()`, and report a specific startup result. After successful startup, the node remains in a FreeRTOS-backed application loop that asks VaydeEngine to dequeue one frame every 10 ms. Dequeued frames are currently reported and discarded without packet validation or application delivery.
 
 ## Current Startup Path
 
@@ -34,9 +34,14 @@ ESP-IDF app_main()
         -> validate board model, protocol version, settings version, and transport selection
         -> retain pointers to identity, settings, and transport
     -> return and log NodeBootstrapStatus
+    -> enter the app_main receive-consumer loop
+        -> VaydeEngine::consumeNextPacket()
+        -> TransportInterface::tryReceive(Packet&)
+        -> report dequeued frames as unvalidated
+        -> delay 10 ms before the next receive attempt
 ```
 
-`NodeBootstrapStatus::Ready` currently means that hardware-identity retrieval, settings loading, transport selection, channel configuration, ESP-NOW initialization, receive-queue creation, receive-callback registration, engine prerequisite validation, and engine dependency binding succeeded. It does not mean that an engine processing loop is running or that an incoming frame has been dequeued or validated as a VaydeNet message.
+`NodeBootstrapStatus::Ready` currently means that hardware-identity retrieval, settings loading, transport selection, channel configuration, ESP-NOW initialization, receive-queue creation, receive-callback registration, engine prerequisite validation, and engine dependency binding succeeded. After this status, `app_main()` starts the receive-consumer loop. It does not mean that any frame has been dequeued or validated as a VaydeNet message.
 
 `NodeBootstrapStatus::ReadyAfterProvisioning` means the same initialization completed after the loader created and committed the current development defaults: ESP-NOW on channel `1`.
 
@@ -119,7 +124,7 @@ TransportInterface::tryReceive(Packet&) -> TransportReceiveStatus
 
 `TransportReceiveStatus` distinguishes `Received`, `Empty`, and `NotInitialized`. The contract includes the current `Packet` prototype directly so every adapter implementation uses the same complete type.
 
-`EspNowTransport` overrides this method and translates its FreeRTOS queue result into the portable status. Queue ownership, callback registration, and ESP-NOW-specific buffering remain private to the adapter. A VaydeEngine consumer is not yet implemented.
+`EspNowTransport` overrides this method and translates its FreeRTOS queue result into the portable status. Queue ownership, callback registration, and ESP-NOW-specific buffering remain private to the adapter. `VaydeEngine::consumeNextPacket()` now calls this contract and maps it to `PacketDequeued`, `QueueEmpty`, `NotStarted`, or `TransportNotReady` without importing FreeRTOS or ESP-NOW headers into the engine.
 
 ### VaydeEngine startup handoff
 
@@ -127,7 +132,7 @@ TransportInterface::tryReceive(Packet&) -> TransportReceiveStatus
 
 The engine rejects repeated startup, a missing board model, unsupported protocol or settings versions, and an unspecified transport. After validation, it retains pointers to the bootstrap-owned dependencies and reports `EngineStartStatus::Ok`. Bootstrap maps any rejected start to `NodeBootstrapStatus::EngineStartupFailed`.
 
-This is dependency validation and binding only. `VaydeEngine::start()` does not yet launch a task, poll the transport, dequeue packets, validate packet fields or CRC, deliver messages, or relay traffic.
+`VaydeEngine::start()` remains dependency validation and binding only. After startup, the node application's existing FreeRTOS `app_main` task repeatedly calls `VaydeEngine::consumeNextPacket()`. The engine performs one nonblocking transport receive attempt per call. A received frame is removed from the queue and reported to the application as `PacketDequeued`; the engine does not yet validate packet fields or CRC, deliver messages, or relay traffic.
 
 ### ESP-NOW adapter initialization
 
@@ -149,7 +154,7 @@ The accepted configured channel range is `1` through `14`. Initialization is rej
 
 The receive callback rejects null metadata, null source addresses, null payload pointers, and non-positive lengths. For accepted callbacks, it logs the sender MAC address and received byte count. It then accepts only frames whose length equals `sizeof(Packet)`, copies them into a local `Packet`, requests the configured activity indication, and uses nonblocking `xQueueSend(..., 0)` to copy them into the receive queue. A full queue causes the new packet to be dropped and logged rather than blocking the Wi-Fi callback; the activity indication has already been requested because it currently represents receipt rather than queue acceptance or processing.
 
-`tryReceive(Packet&)` uses nonblocking `xQueueReceive(..., 0)` and distinguishes `Received`, `Empty`, and `NotInitialized`. No application or engine code calls it yet, so an active sender will fill all four slots and subsequent packets will be dropped. The adapter does not yet register peers, transmit data, register a send-completion callback, validate the 220-byte prototype packet, deliver a logical message into VaydeEngine, or perform fragmentation and reassembly.
+`tryReceive(Packet&)` uses nonblocking `xQueueReceive(..., 0)` and distinguishes `Received`, `Empty`, and `NotInitialized`. VaydeEngine now calls it through the portable interface from the node's receive-consumer loop. Polling starts only after successful bootstrap and occurs every 10 ms, allowing queued frames to be drained outside the Wi-Fi callback. The adapter does not yet register peers, transmit data, register a send-completion callback, validate the 220-byte prototype packet, deliver a logical message into VaydeEngine, or perform fragmentation and reassembly.
 
 ## Existing Packet and Experiments
 
@@ -207,11 +212,11 @@ The current checkpoint does not include:
 - tests for empty, missing, corrupt, valid, and unsupported stored settings;
 - ESP-NOW peer management;
 - ESP-NOW transmission and send-completion handling;
-- consumption and hardware validation of the new queue, packet validation, and logical-message delivery through the portable receive contract;
+- hardware validation of queue consumption, packet validation, and logical-message delivery through the portable receive contract;
 - a common serialized VaydeNet message contract;
 - finalized protocol identity, message types, capability discovery, or authentication;
 - transport-native nRF24L01, LoRa, Bluetooth, Wi-Fi, or Ethernet adapters;
-- an operational VaydeEngine packet-processing task or node-ready loop;
+- an operational packet-validation and message-processing stage after the node receive loop;
 - a finalized ESP32-S2 flash-size configuration and hardware proof of its active-low activity LED behavior;
 - direct hardware capture of the blank-NVS automatic provisioning branch;
 - bidirectional delivery proof and validated VaydeNet message processing.
@@ -247,11 +252,13 @@ On September 8, 2026, the portable receive-contract translation built successful
 
 On September 8, 2026, a host regression test compiled the production `EspNowTransport.cpp` against deterministic ESP-IDF and FreeRTOS fakes, then drove the registered ESP-NOW callback. Address and undefined-behavior sanitizers passed while the test verified exact-size rejection, owned frame copies, FIFO order, four-frame capacity, full-queue dropping, and nonblocking `NotInitialized`, `Empty`, and `Received` results. A clean `espnow_esp32s3_mini` firmware rebuild also passed with 36,712 bytes of RAM and 739,497 bytes of flash. This is deterministic software verification of the adapter logic; it is not physical radio, ESP-IDF scheduler, or hardware enqueue/dequeue proof.
 
+On September 8, 2026, the portable VaydeEngine receive-consumer test passed under address and undefined-behavior sanitizers. It verified rejection before engine startup, one transport receive attempt per poll, and correct mapping of empty, received, and uninitialized transport results. A clean `espnow_esp32s3_mini` firmware build then passed with the application receive loop, using 36,712 bytes of RAM and 739,969 bytes of flash. This proves compilation and deterministic consumer control flow; no board was flashed, so continuous hardware queue draining and serial reporting remain unverified.
+
 ## Repository State
 
-The active development branch is `agent/esp32-node-bootstrap`. The September 8 checkpoint adds the portable receive contract, ESP-NOW adapter translation, and host receive-queue regression test. The generated `apps/node/dependencies.lock` target change remains excluded pending a stable multi-target lock policy.
+The active development branch is `agent/esp32-node-bootstrap`. The September 8 work adds the portable receive contract, ESP-NOW adapter translation, host receive-queue regression test, portable VaydeEngine consumer, and node receive loop. The generated `apps/node/dependencies.lock` target change remains excluded pending a stable multi-target lock policy.
 
-`EngineStartupContext` is now constructed from bootstrap-owned hardware identity, node settings, and the selected initialized transport. `VaydeEngine::start()` validates and retains those dependencies. No engine processing task or packet consumer exists yet.
+`EngineStartupContext` is constructed from bootstrap-owned hardware identity, node settings, and the selected initialized transport. `VaydeEngine::start()` validates and retains those dependencies. The application loop now consumes queued frames through the engine, but packet validation and logical delivery remain absent.
 
 The branch also contains multiple concerns relative to `main`, including node bootstrap work, the ESP-NOW adapter, example configuration, and the message-inbox simulator. Build success does not make the complete branch merge-ready. Scope cleanup, documentation review, focused commits, settings-path testing, and hardware validation remain required before merge.
 
@@ -262,6 +269,6 @@ The branch also contains multiple concerns relative to `main`, including node bo
 3. Erase or isolate the NVS namespace and capture the first-boot `ReadyAfterProvisioning` result, then reboot and capture the stored-settings `Ready` result.
 4. Exercise missing-key, invalid-transport, invalid-channel, valid-settings, NVS-read-failure, and NVS-write-failure paths.
 5. Replace automatic development defaults with an operator-controlled production provisioning contract before deployment.
-6. Flash and exercise the bounded queue, then add controlled `tryReceive()` consumption, packet validation, and delivery outside the Wi-Fi callback context.
+6. Flash and exercise the bounded queue and controlled `tryReceive()` consumer, then add packet validation and delivery outside the Wi-Fi callback context.
 7. Add ESP-NOW peer management, transmission, and send-completion handling behind the adapter boundary.
 8. Define the logical message contract before connecting message I/O to VaydeEngine.

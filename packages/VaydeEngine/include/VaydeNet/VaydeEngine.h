@@ -12,11 +12,19 @@ enum class EngineStartStatus : std::uint8_t {
     StartupFailed
 };
 
+enum class EngineReceiveStatus : std::uint8_t {
+    PacketDequeued,
+    QueueEmpty,
+    NotStarted,
+    TransportNotReady
+};
+
 class VaydeEngine {
 public:
     EngineStartStatus start(
         const EngineStartupContext& context
     );
+    EngineReceiveStatus consumeNextPacket();
 
 private:
     const HardwareIdentity* identity_{nullptr};
