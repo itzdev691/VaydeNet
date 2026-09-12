@@ -261,13 +261,17 @@ After flashing compatible sender and node firmware, the user confirmed that node
 
 ## Repository State
 
-The active development branch is `agent/esp32-node-bootstrap`. It includes the portable receive contract, ESP-NOW adapter translation, host receive-queue regression test, VaydeEngine consumer and validation stage, node receive loop, and compatible ESP-NOW sender. The generated `apps/node/dependencies.lock` target change remains excluded pending a stable multi-target lock policy.
+The active development branch is `agent/esp32-node-bootstrap`. It includes the portable receive contract, ESP-NOW adapter translation, host receive-queue regression test, VaydeEngine consumer and validation stage, node receive loop, and compatible ESP-NOW sender. `apps/node/dependencies.lock` is committed with `target: esp32s3`; the file remains target-sensitive and may change when another node environment is built, so this does not establish a stable multi-target lock policy.
 
 `EngineStartupContext` is constructed from bootstrap-owned hardware identity, node settings, and the selected initialized transport. `VaydeEngine::start()` validates and retains those dependencies. The application loop consumes queued frames through the engine, validates them, receives accepted packet data, and logs accepted or rejected outcomes. Packet retention and logical delivery remain absent.
 
 The packet-validation checkpoint spans the engine, node application, compatible ESP-NOW sender, host tests, build registration, and this status document. The validator header, source, and focused unit test are included as tracked source for the checkpoint.
 
-The branch also contains multiple concerns relative to `main`, including node bootstrap work, the ESP-NOW adapter, example configuration, and the message-inbox simulator. Build success does not make the complete branch merge-ready. Scope cleanup, documentation review, focused commits, settings-path testing, and hardware validation remain required before merge.
+The branch contains the cumulative node-bootstrap implementation relative to `main`, including bootstrap ownership, ESP-NOW initialization and receive buffering, VaydeEngine startup and packet consumption, packet validation, supporting examples, tests, and documentation. The bounded feature is ready to merge as a prototype node-bootstrap receive-and-validation checkpoint: software tests pass, firmware integration builds, and the accepted-packet path has user-confirmed hardware/runtime proof. The missing core work and later development sequence below remain follow-on work rather than blockers for this feature boundary.
+
+## Merge Readiness
+
+The merge boundary ends after VaydeEngine dequeues one packet, validates version, type, TTL, length, and CRC, and returns either the accepted packet or an exact rejection reason. It includes application logging of accepted and rejected outcomes. It does not claim logical-message delivery, packet retention, reusable-adapter transmission, peer management, authentication, routing, relay behavior, production provisioning, or finalized cross-transport serialization.
 
 ## Implemented Checkpoint: Validate Dequeued Packets
 
