@@ -4,6 +4,7 @@
 #include "VaydeNet/startup/HardwareIdentity.h"
 #include "VaydeNet/startup/EngineStartupContext.h"
 #include "VaydeNet/transport/TransportInterface.h"
+#include "VaydeNet/packet/PacketValidation.h"
 
 namespace {
 
@@ -50,27 +51,63 @@ EngineStartStatus VaydeEngine::start(
     return EngineStartStatus::Ok;
 }
 
-EngineReceiveStatus VaydeEngine::consumeNextPacket() {
+EngineReceiveResult VaydeEngine::consumeNextPacket() {
     if (!started_) {
-        return EngineReceiveStatus::NotStarted;
+        return {
+            EngineReceiveStatus::NotStarted,
+            PacketValidationStatus::NotChecked,
+            Packet{}
+        };
     }
 
     if (transport_ == nullptr) {
-        return EngineReceiveStatus::TransportNotReady;
+        return {
+            EngineReceiveStatus::TransportNotReady,
+            PacketValidationStatus::NotChecked,
+            Packet{}
+        };
     }
 
     Packet packet{};
 
     switch (transport_->tryReceive(packet)) {
-        case TransportReceiveStatus::Received:
-            return EngineReceiveStatus::PacketDequeued;
+        case TransportReceiveStatus::Received: {
+            const PacketValidationStatus validation =
+                validatePacket(packet);
+
+            if (validation == PacketValidationStatus::Valid) {
+                return {
+                    EngineReceiveStatus::PacketAccepted,
+                    validation,
+                    packet
+                };
+            }
+
+            return {
+                EngineReceiveStatus::PacketRejected,
+                validation,
+                Packet{}
+            };
+        }
 
         case TransportReceiveStatus::Empty:
-            return EngineReceiveStatus::QueueEmpty;
+            return {
+                EngineReceiveStatus::QueueEmpty,
+                PacketValidationStatus::NotChecked,
+                Packet{}
+            };
 
         case TransportReceiveStatus::NotInitialized:
-            return EngineReceiveStatus::TransportNotReady;
+            return {
+                EngineReceiveStatus::TransportNotReady,
+                PacketValidationStatus::NotChecked,
+                Packet{}
+            };
     }
 
-    return EngineReceiveStatus::TransportNotReady;
+    return {
+        EngineReceiveStatus::TransportNotReady,
+        PacketValidationStatus::NotChecked,
+        Packet{}
+    };
 }

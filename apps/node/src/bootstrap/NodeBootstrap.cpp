@@ -1,5 +1,6 @@
 #include "bootstrap/NodeBootstrap.h"
 #include "NodeSettingsLoader.h"
+#include "VaydeNet/VaydeEngine.h"
 #include "VaydeNet/startup/EngineStartupContext.h"
 
 #ifndef VAYDENET_ACTIVITY_LED_GPIO
@@ -90,6 +91,6 @@ NodeBootstrapStatus NodeBootstrap::run() {
     return NodeBootstrapStatus::Ready;
 }
 
-EngineReceiveStatus NodeBootstrap::consumeNextPacket() {
+EngineReceiveResult NodeBootstrap::consumeNextPacket() {
     return vayde_engine_.consumeNextPacket();
 }

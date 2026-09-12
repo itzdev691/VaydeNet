@@ -11,15 +11,60 @@ namespace {
 constexpr char kLogTag[] = "NodeBootstrap";
 constexpr std::uint32_t kReceivePollIntervalMs = 10;
 
+const char* packetValidationStatusName(PacketValidationStatus status) {
+    switch (status) {
+        case PacketValidationStatus::NotChecked:
+            return "not checked";
+
+        case PacketValidationStatus::Valid:
+            return "valid";
+
+        case PacketValidationStatus::UnsupportedVersion:
+            return "unsupported version";
+
+        case PacketValidationStatus::InvalidType:
+            return "invalid type";
+
+        case PacketValidationStatus::InvalidTtl:
+            return "invalid TTL";
+
+        case PacketValidationStatus::InvalidLength:
+            return "invalid length";
+
+        case PacketValidationStatus::CrcMismatch:
+            return "CRC mismatch";
+    }
+
+    return "unknown validation result";
+}
+
+void logAcceptedPacket(const Packet& packet) {
+    ESP_LOGI(
+        kLogTag,
+        "VaydeEngine accepted packet: type=%u length=%u sequence=%lu",
+        static_cast<unsigned>(packet.type),
+        static_cast<unsigned>(packet.length),
+        static_cast<unsigned long>(packet.sequenceNumber)
+    );
+}
+
 void runReceiveConsumer(NodeBootstrap& bootstrap) {
     ESP_LOGI(kLogTag, "VaydeEngine receive consumer started");
 
     while (true) {
-        switch (bootstrap.consumeNextPacket()) {
-            case EngineReceiveStatus::PacketDequeued:
-                ESP_LOGI(
+        const EngineReceiveResult receive_result =
+            bootstrap.consumeNextPacket();
+
+        switch (receive_result.status) {
+            case EngineReceiveStatus::PacketAccepted:
+                logAcceptedPacket(receive_result.packet);
+                break;
+
+            case EngineReceiveStatus::PacketRejected:
+                ESP_LOGW(
                     kLogTag,
-                    "VaydeEngine dequeued an unvalidated frame"
+                    "VaydeEngine rejected packet: %s",
+                    packetValidationStatusName(receive_result.validation)
                 );
                 break;
 

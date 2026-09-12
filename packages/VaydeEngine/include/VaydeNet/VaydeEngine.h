@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include "VaydeNet/packet/PacketValidation.h"
 
 struct EngineStartupContext;
 struct HardwareIdentity;
@@ -13,10 +14,17 @@ enum class EngineStartStatus : std::uint8_t {
 };
 
 enum class EngineReceiveStatus : std::uint8_t {
-    PacketDequeued,
+    PacketAccepted,
+    PacketRejected,
     QueueEmpty,
     NotStarted,
     TransportNotReady
+};
+
+struct EngineReceiveResult {
+    EngineReceiveStatus status;
+    PacketValidationStatus validation;
+    Packet packet;
 };
 
 class VaydeEngine {
@@ -24,7 +32,7 @@ public:
     EngineStartStatus start(
         const EngineStartupContext& context
     );
-    EngineReceiveStatus consumeNextPacket();
+    EngineReceiveResult consumeNextPacket();
 
 private:
     const HardwareIdentity* identity_{nullptr};

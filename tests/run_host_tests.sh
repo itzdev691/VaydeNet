@@ -27,6 +27,15 @@ echo "PASS: Packet layout"
 "$cxx" \
     "${common_flags[@]}" \
     -I"$repo_root/packages/VaydeEngine/include" \
+    "$repo_root/packages/VaydeEngine/src/PacketValidation.cpp" \
+    "$repo_root/tests/unit/packet_validation_test.cpp" \
+    -o "$test_build_dir/packet_validation_test"
+"$test_build_dir/packet_validation_test"
+
+"$cxx" \
+    "${common_flags[@]}" \
+    -I"$repo_root/packages/VaydeEngine/include" \
+    "$repo_root/packages/VaydeEngine/src/PacketValidation.cpp" \
     "$repo_root/packages/VaydeEngine/src/VaydeEngine.cpp" \
     "$repo_root/tests/unit/vayde_engine_receive_consumer_test.cpp" \
     -o "$test_build_dir/vayde_engine_receive_consumer_test"
