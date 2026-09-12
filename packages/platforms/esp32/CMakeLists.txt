@@ -1,0 +1,16 @@
+idf_component_register(
+    SRCS
+        "Esp32BoardInfo.cpp"
+        "Esp32NodeSettingsStorage.cpp"
+        "Esp32RgbLed.cpp"
+    INCLUDE_DIRS
+        "."
+        "../../VaydeEngine/include"
+    REQUIRES
+        espressif__led_strip
+        freertos
+    PRIV_REQUIRES
+        esp_driver_gpio
+        esp_hw_support
+        nvs_flash
+)
