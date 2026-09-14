@@ -19,10 +19,13 @@ constexpr uint16_t kCrcPolynomial = 0x1021U;
 
 // Replace with the receiver's MAC address. FF:FF:FF:FF:FF:FF broadcasts.
 uint8_t peerAddress[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-const char *message = "Hello from VaydeESP";
+constexpr char message[] = "Hello from VaydeESP";
 
 Packet packet{};
 bool espNowReady = false;
+
+static_assert(sizeof(message) <= sizeof(packet.payload),
+              "Sender message exceeds the packet payload capacity");
 
 uint16_t computePacketCrc(const Packet& packetToChecksum) {
     const auto* bytes =
@@ -95,7 +98,7 @@ void preparePacket() {
     packet.type = kPacketType;
     packet.ttl = kPacketTtl;
 
-    const size_t messageLength = strnlen(message, sizeof(packet.payload) - 1);
+    constexpr size_t messageLength = sizeof(message) - 1;
     memset(packet.payload, 0, sizeof(packet.payload));
     memcpy(packet.payload, message, messageLength);
     packet.length = static_cast<uint16_t>(messageLength);
