@@ -1,0 +1,6 @@
+# Match the WEMOS LOLIN S3 Mini board definition.
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+
+# Route ESP-IDF logs through the board's native USB connection.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
