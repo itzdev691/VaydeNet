@@ -21,6 +21,30 @@ constexpr char kLogTag[] = "EspNowTransport";
 
 EspNowTransport* EspNowTransport::active_instance_ = nullptr;
 
+EspNowTransport::~EspNowTransport() {
+    shutdown();
+}
+
+void EspNowTransport::shutdown() {
+    if (active_instance_ == this) {
+        (void)esp_now_unregister_recv_cb();
+        active_instance_ = nullptr;
+    }
+
+    if (initialized_) {
+        (void)esp_now_deinit();
+        initialized_ = false;
+    }
+
+    if (receive_queue_ != nullptr) {
+        vQueueDelete(receive_queue_);
+        receive_queue_ = nullptr;
+    }
+
+    receive_activity_callback_ = nullptr;
+    receive_activity_context_ = nullptr;
+}
+
 void EspNowTransport::setReceiveActivityCallback(
     EspNowReceiveActivityCallback callback,
     void* context

@@ -12,6 +12,14 @@ using EspNowReceiveActivityCallback = void (*)(void* context);
 
 class EspNowTransport final : public TransportInterface {
 public:
+    EspNowTransport() = default;
+    ~EspNowTransport() override;
+
+    EspNowTransport(const EspNowTransport&) = delete;
+    EspNowTransport& operator=(const EspNowTransport&) = delete;
+
+    void shutdown();
+
     bool configureChannel(std::uint16_t channel);
     TransportStatus initialize() override;
     TransportReceiveStatus tryReceive(Packet& packet) override;

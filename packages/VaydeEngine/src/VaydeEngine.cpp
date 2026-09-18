@@ -14,6 +14,7 @@ constexpr std::uint16_t kSupportedSettingsVersion = 1;
 }  // namespace
 
 EngineStartStatus VaydeEngine::start(
+    // Check if variables are valid before saying engine is ready
     const EngineStartupContext& context
 ) {
     if (started_) {

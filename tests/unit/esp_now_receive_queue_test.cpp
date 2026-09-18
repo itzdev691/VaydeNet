@@ -126,7 +126,10 @@ esp_err_t esp_now_register_recv_cb(esp_now_recv_cb_t callback) {
     registered_receive_callback = callback;
     return ESP_OK;
 }
-
+esp_err_t esp_now_unregister_recv_cb() {
+    registered_receive_callback = nullptr;
+    return ESP_OK;
+}
 QueueHandle_t xQueueCreate(
     UBaseType_t queue_length,
     UBaseType_t item_size
