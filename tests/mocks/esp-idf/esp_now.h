@@ -17,3 +17,4 @@ using esp_now_recv_cb_t = void (*)(
 esp_err_t esp_now_init();
 esp_err_t esp_now_deinit();
 esp_err_t esp_now_register_recv_cb(esp_now_recv_cb_t callback);
+esp_err_t esp_now_unregister_recv_cb();
