@@ -2,6 +2,7 @@ idf_component_register(
     SRCS
         "main.cpp"
         "bootstrap/NodeBootstrap.cpp"
+        "NodeMessageSink.cpp"
         "NodeSettingsLoader.cpp"
     INCLUDE_DIRS
         "."

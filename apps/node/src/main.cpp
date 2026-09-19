@@ -38,48 +38,53 @@ const char* packetValidationStatusName(PacketValidationStatus status) {
     return "unknown validation result";
 }
 
-void logAcceptedPacket(const Packet& packet) {
-    ESP_LOGI(
-        kLogTag,
-        "VaydeEngine accepted packet: type=%u length=%u sequence=%lu",
-        static_cast<unsigned>(packet.type),
-        static_cast<unsigned>(packet.length),
-        static_cast<unsigned long>(packet.sequenceNumber)
-    );
-}
-
-void runReceiveConsumer(NodeBootstrap& bootstrap) {
-    ESP_LOGI(kLogTag, "VaydeEngine receive consumer started");
+void runPacketProcessor(NodeBootstrap& bootstrap) {
+    ESP_LOGI(kLogTag, "VaydeEngine packet processor started");
 
     while (true) {
-        const EngineReceiveResult receive_result =
-            bootstrap.consumeNextPacket();
+        const EngineProcessResult process_result =
+            bootstrap.processNextPacket();
 
-        switch (receive_result.status) {
-            case EngineReceiveStatus::PacketAccepted:
-                logAcceptedPacket(receive_result.packet);
+        switch (process_result.status) {
+            case EngineProcessStatus::MessageDelivered:
                 break;
 
-            case EngineReceiveStatus::PacketRejected:
+            case EngineProcessStatus::PacketRejected:
                 ESP_LOGW(
                     kLogTag,
                     "VaydeEngine rejected packet: %s",
-                    packetValidationStatusName(receive_result.validation)
+                    packetValidationStatusName(process_result.validation)
                 );
                 break;
 
-            case EngineReceiveStatus::QueueEmpty:
+            case EngineProcessStatus::UnsupportedMessageType:
+                ESP_LOGW(kLogTag, "Unsupported logical message type");
                 break;
 
-            case EngineReceiveStatus::NotStarted:
+            case EngineProcessStatus::InvalidMessageLength:
+                ESP_LOGW(kLogTag, "Invalid logical message length");
+                break;
+
+            case EngineProcessStatus::MessageRejected:
+                ESP_LOGW(kLogTag, "Logical message sink rejected message");
+                break;
+
+            case EngineProcessStatus::QueueEmpty:
+                break;
+
+            case EngineProcessStatus::NotStarted:
                 ESP_LOGE(kLogTag, "VaydeEngine is not started");
                 return;
 
-            case EngineReceiveStatus::TransportNotReady:
+            case EngineProcessStatus::TransportNotReady:
                 ESP_LOGE(
                     kLogTag,
                     "VaydeEngine receive transport is not ready"
                 );
+                return;
+
+            case EngineProcessStatus::MessageSinkUnavailable:
+                ESP_LOGE(kLogTag, "VaydeEngine message sink is unavailable");
                 return;
         }
 
@@ -142,5 +147,5 @@ extern "C" void app_main() {
             return;
     }
 
-    runReceiveConsumer(bootstrap);
+    runPacketProcessor(bootstrap);
 }

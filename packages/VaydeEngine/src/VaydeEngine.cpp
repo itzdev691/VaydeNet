@@ -1,10 +1,14 @@
 #include "VaydeNet/VaydeEngine.h"
+
 #include "VaydeNet/config/NodeSettings.h"
+#include "VaydeNet/message/Message.h"
+#include "VaydeNet/message/MessageSink.h"
+#include "VaydeNet/message/PacketMessageDecoder.h"
 #include "VaydeNet/packet/Packet.h"
-#include "VaydeNet/startup/HardwareIdentity.h"
-#include "VaydeNet/startup/EngineStartupContext.h"
-#include "VaydeNet/transport/TransportInterface.h"
 #include "VaydeNet/packet/PacketValidation.h"
+#include "VaydeNet/startup/EngineStartupContext.h"
+#include "VaydeNet/startup/HardwareIdentity.h"
+#include "VaydeNet/transport/TransportInterface.h"
 
 namespace {
 
@@ -14,7 +18,6 @@ constexpr std::uint16_t kSupportedSettingsVersion = 1;
 }  // namespace
 
 EngineStartStatus VaydeEngine::start(
-    // Check if variables are valid before saying engine is ready
     const EngineStartupContext& context
 ) {
     if (started_) {
@@ -47,25 +50,31 @@ EngineStartStatus VaydeEngine::start(
     identity_ = &context.identity;
     settings_ = &context.settings;
     transport_ = &context.transport;
+    message_sink_ = &context.message_sink;
     started_ = true;
 
     return EngineStartStatus::Ok;
 }
 
-EngineReceiveResult VaydeEngine::consumeNextPacket() {
+EngineProcessResult VaydeEngine::processNextPacket() {
     if (!started_) {
         return {
-            EngineReceiveStatus::NotStarted,
-            PacketValidationStatus::NotChecked,
-            Packet{}
+            EngineProcessStatus::NotStarted,
+            PacketValidationStatus::NotChecked
         };
     }
 
     if (transport_ == nullptr) {
         return {
-            EngineReceiveStatus::TransportNotReady,
-            PacketValidationStatus::NotChecked,
-            Packet{}
+            EngineProcessStatus::TransportNotReady,
+            PacketValidationStatus::NotChecked
+        };
+    }
+
+    if (message_sink_ == nullptr) {
+        return {
+            EngineProcessStatus::MessageSinkUnavailable,
+            PacketValidationStatus::NotChecked
         };
     }
 
@@ -76,39 +85,63 @@ EngineReceiveResult VaydeEngine::consumeNextPacket() {
             const PacketValidationStatus validation =
                 validatePacket(packet);
 
-            if (validation == PacketValidationStatus::Valid) {
+            if (validation != PacketValidationStatus::Valid) {
                 return {
-                    EngineReceiveStatus::PacketAccepted,
-                    validation,
-                    packet
+                    EngineProcessStatus::PacketRejected,
+                    validation
+                };
+            }
+
+            Message message{};
+
+            switch (decodeValidatedPacket(packet, message)) {
+                case PacketMessageDecodeStatus::Decoded:
+                    break;
+
+                case PacketMessageDecodeStatus::UnsupportedType:
+                    return {
+                        EngineProcessStatus::UnsupportedMessageType,
+                        validation
+                    };
+
+                case PacketMessageDecodeStatus::InvalidLength:
+                    return {
+                        EngineProcessStatus::InvalidMessageLength,
+                        validation
+                    };
+            }
+
+            if (
+                message_sink_->deliver(message) ==
+                MessageSinkStatus::Delivered
+            ) {
+                return {
+                    EngineProcessStatus::MessageDelivered,
+                    validation
                 };
             }
 
             return {
-                EngineReceiveStatus::PacketRejected,
-                validation,
-                Packet{}
+                EngineProcessStatus::MessageRejected,
+                validation
             };
         }
 
         case TransportReceiveStatus::Empty:
             return {
-                EngineReceiveStatus::QueueEmpty,
-                PacketValidationStatus::NotChecked,
-                Packet{}
+                EngineProcessStatus::QueueEmpty,
+                PacketValidationStatus::NotChecked
             };
 
         case TransportReceiveStatus::NotInitialized:
             return {
-                EngineReceiveStatus::TransportNotReady,
-                PacketValidationStatus::NotChecked,
-                Packet{}
+                EngineProcessStatus::TransportNotReady,
+                PacketValidationStatus::NotChecked
             };
     }
 
     return {
-        EngineReceiveStatus::TransportNotReady,
-        PacketValidationStatus::NotChecked,
-        Packet{}
+        EngineProcessStatus::TransportNotReady,
+        PacketValidationStatus::NotChecked
     };
 }

@@ -3,11 +3,12 @@
 #include <cstdint>
 
 #include "Esp32BoardInfo.h"
-#include "VaydeNet/config/NodeSettings.h"
 #include "EspNowTransport.h"
-#include "VaydeNet/transport/TransportInterface.h"
 #include "Esp32RgbLed.h"
+#include "NodeMessageSink.h"
 #include "VaydeNet/VaydeEngine.h"
+#include "VaydeNet/config/NodeSettings.h"
+#include "VaydeNet/transport/TransportInterface.h"
 
 enum class NodeBootstrapStatus : std::uint8_t {
     Ready,
@@ -24,7 +25,7 @@ enum class NodeBootstrapStatus : std::uint8_t {
 class NodeBootstrap {
 public:
     NodeBootstrapStatus run();
-    EngineReceiveResult consumeNextPacket();
+    EngineProcessResult processNextPacket();
 
 private:
     HardwareIdentity hardware_identity_{};
@@ -33,6 +34,7 @@ private:
 
     Esp32RgbLed packet_activity_led_{};
     EspNowTransport esp_now_transport_{};
+    NodeMessageSink node_message_sink_{};
     TransportInterface* selected_transport_{nullptr};
 
     VaydeEngine vayde_engine_{};
