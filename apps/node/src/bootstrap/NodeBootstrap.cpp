@@ -1,4 +1,5 @@
 #include "bootstrap/NodeBootstrap.h"
+
 #include "NodeSettingsLoader.h"
 #include "VaydeNet/VaydeEngine.h"
 #include "VaydeNet/startup/EngineStartupContext.h"
@@ -74,7 +75,8 @@ NodeBootstrapStatus NodeBootstrap::run() {
     EngineStartupContext engine_startup_context{
         hardware_identity_,
         node_settings_,
-        *selected_transport_
+        *selected_transport_,
+        node_message_sink_
     };
 
     const EngineStartStatus engine_start_status =
@@ -91,6 +93,6 @@ NodeBootstrapStatus NodeBootstrap::run() {
     return NodeBootstrapStatus::Ready;
 }
 
-EngineReceiveResult NodeBootstrap::consumeNextPacket() {
-    return vayde_engine_.consumeNextPacket();
+EngineProcessResult NodeBootstrap::processNextPacket() {
+    return vayde_engine_.processNextPacket();
 }

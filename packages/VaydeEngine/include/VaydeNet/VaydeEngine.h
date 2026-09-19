@@ -1,11 +1,14 @@
 #pragma once
 
 #include <cstdint>
+
 #include "VaydeNet/packet/PacketValidation.h"
 
 struct EngineStartupContext;
 struct HardwareIdentity;
 struct NodeSettings;
+
+class MessageSink;
 class TransportInterface;
 
 enum class EngineStartStatus : std::uint8_t {
@@ -13,18 +16,21 @@ enum class EngineStartStatus : std::uint8_t {
     StartupFailed
 };
 
-enum class EngineReceiveStatus : std::uint8_t {
-    PacketAccepted,
+enum class EngineProcessStatus : std::uint8_t {
+    MessageDelivered,
     PacketRejected,
+    UnsupportedMessageType,
+    InvalidMessageLength,
+    MessageRejected,
     QueueEmpty,
     NotStarted,
-    TransportNotReady
+    TransportNotReady,
+    MessageSinkUnavailable
 };
 
-struct EngineReceiveResult {
-    EngineReceiveStatus status;
+struct EngineProcessResult {
+    EngineProcessStatus status;
     PacketValidationStatus validation;
-    Packet packet;
 };
 
 class VaydeEngine {
@@ -32,11 +38,13 @@ public:
     EngineStartStatus start(
         const EngineStartupContext& context
     );
-    EngineReceiveResult consumeNextPacket();
+
+    EngineProcessResult processNextPacket();
 
 private:
     const HardwareIdentity* identity_{nullptr};
     const NodeSettings* settings_{nullptr};
     TransportInterface* transport_{nullptr};
+    MessageSink* message_sink_{nullptr};
     bool started_{false};
 };
