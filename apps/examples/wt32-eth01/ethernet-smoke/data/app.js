@@ -61,21 +61,42 @@ function renderPortProbes(portProbes) {
         }`,
   );
 
+  const testedPorts = portProbes.ports.filter((probe) => probe.tested);
+  const respondingPorts = testedPorts.filter((probe) => probe.open).length;
+  setText(
+    "port-summary",
+    testedPorts.length === 0
+      ? "Waiting for first sweep"
+      : `${respondingPorts} of ${portProbes.ports.length} ports responding`,
+  );
+
   const cards = portProbes.ports.map((probe) => {
     const card = document.createElement("article");
     const state = !probe.tested ? "pending" : probe.open ? "open" : "closed";
     card.className = "probe-card";
     card.dataset.state = state;
 
-    const label = document.createElement("span");
-    label.textContent = `TCP ${probe.port}`;
+    const topline = document.createElement("div");
+    topline.className = "probe-topline";
 
-    const value = document.createElement("strong");
+    const protocol = document.createElement("span");
+    protocol.textContent = "TCP port";
+
+    const indicator = document.createElement("i");
+    indicator.setAttribute("aria-hidden", "true");
+    topline.append(protocol, indicator);
+
+    const port = document.createElement("strong");
+    port.className = "probe-port mono";
+    port.textContent = probe.port;
+
+    const value = document.createElement("span");
+    value.className = "probe-state";
     value.textContent =
       state === "pending"
         ? "Pending"
         : state === "open"
-          ? "Open"
+          ? "Responding"
           : "Unavailable";
 
     const detail = document.createElement("small");
@@ -83,20 +104,64 @@ function renderPortProbes(portProbes) {
       ? `${integer.format(probe.latencyMs)} ms`
       : "Awaiting probe";
 
-    card.append(label, value, detail);
+    card.append(topline, port, value, detail);
     return card;
   });
 
   container.replaceChildren(...cards);
 }
 
+function renderRouterHealth(router) {
+  const routerHealth = elements["router-health"];
+
+  if (router.state === "disconnected") {
+    routerHealth.dataset.state = "disconnected";
+    setText("router-health-label", "Ethernet disconnected");
+    setText(
+      "router-health-detail",
+      "The board has no physical link, so router status cannot be confirmed.",
+    );
+    setText("router-health-target", "No link");
+    return;
+  }
+
+  if (router.state === "suspected_down") {
+    routerHealth.dataset.state = "offline";
+    setText("router-health-label", "Router may be down");
+    setText(
+      "router-health-detail",
+      "Ethernet is linked, but no DHCP lease or gateway was received.",
+    );
+    setText("router-health-target", "No gateway");
+    return;
+  }
+
+  routerHealth.dataset.state = "online";
+  setText("router-health-label", "Router connection detected");
+  setText(
+    "router-health-detail",
+    "Ethernet is linked and the router supplied a DHCP gateway.",
+  );
+  setText("router-health-target", router.gateway);
+}
+
 function render(status) {
   const { device, network, portProbes, espNow } = status;
+  const router = status.router ?? {
+    state: !network.linkUp
+      ? "disconnected"
+      : network.dhcpReady
+        ? "online"
+        : "suspected_down",
+    gateway: network.gateway,
+  };
   const linkOnline = network.linkUp && network.dhcpReady;
 
   elements.connection.dataset.state = linkOnline ? "online" : "offline";
   setText("connection-label", linkOnline ? "Board online" : "Network unavailable");
-  setText("link-state", network.linkUp ? "Up" : "Down");
+  elements["link-summary"].dataset.state = network.linkUp ? "online" : "offline";
+  elements["dhcp-state"].dataset.state = network.dhcpReady ? "ready" : "pending";
+  setText("link-state", network.linkUp ? "Ethernet link up" : "Ethernet link down");
   setText(
     "link-mode",
     network.linkUp
@@ -113,7 +178,7 @@ function render(status) {
       : "Waiting for DHCP",
   );
   setText("last-updated", `Updated ${new Date().toLocaleTimeString()}`);
-  setText("dhcp-state", network.dhcpReady ? "DHCP ready" : "DHCP waiting");
+  setText("dhcp-state", network.dhcpReady ? "Lease active" : "Waiting for DHCP");
 
   setText("mac", network.mac);
   setText("subnet", network.dhcpReady ? network.subnet : "--");
@@ -122,6 +187,7 @@ function render(status) {
   setText("link-up-events", integer.format(network.linkUpEvents));
   setText("link-down-events", integer.format(network.linkDownEvents));
 
+  renderRouterHealth(router);
   renderPortProbes(portProbes);
 
   setText("tx-accepted", integer.format(espNow.queueAccepted));
@@ -139,7 +205,7 @@ function render(status) {
   setText("delivery-success", integer.format(espNow.deliverySucceeded));
   setText("delivery-failed", integer.format(espNow.deliveryFailed));
   setText("last-delivery", espNow.lastDelivery);
-  setText("accepted-bytes", formatBytes(espNow.queuedBytes));
+  setText("accepted-bytes", `${formatBytes(espNow.queuedBytes)} queued`);
   setText(
     "interval",
     espNow.intervalMs === 1000
@@ -151,8 +217,15 @@ function render(status) {
 
 function renderError() {
   elements.connection.dataset.state = "offline";
+  elements["router-health"].dataset.state = "offline";
   setText("connection-label", "Status API unavailable");
   setText("last-updated", "Unable to refresh status");
+  setText("router-health-label", "Router status unavailable");
+  setText(
+    "router-health-detail",
+    "The board status API cannot be reached, so router state is unknown.",
+  );
+  setText("router-health-target", "Unknown");
 }
 
 async function refreshStatus() {

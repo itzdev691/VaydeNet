@@ -150,9 +150,18 @@ void WebDashboard::sendStatus() {
     const EthernetNetwork::Snapshot network = network_.snapshot();
     const PortMonitor::Snapshot ports = portMonitor_.snapshot();
     const VaydeBroadcaster::Snapshot espNow = broadcaster_.snapshot();
+    const bool gatewayAssigned = network.dhcpReady
+        && static_cast<uint32_t>(network.gateway) != 0;
+    const bool routerSuspectedDown = network.linkUp && !gatewayAssigned;
+    const char *routerState = !network.linkUp
+        ? "disconnected"
+        : (gatewayAssigned ? "online" : "suspected_down");
+    const char *routerReason = !network.linkUp
+        ? "ethernet_link_down"
+        : (gatewayAssigned ? "dhcp_gateway_present" : "dhcp_gateway_missing");
 
     String json;
-    json.reserve(1400);
+    json.reserve(1650);
 
     json += F("{\"device\":{");
     json += F("\"hostname\":\"");
@@ -189,6 +198,25 @@ void WebDashboard::sendStatus() {
     appendUnsigned(json, network.linkUpEvents);
     json += F(",\"linkDownEvents\":");
     appendUnsigned(json, network.linkDownEvents);
+
+    json += F("},\"router\":{");
+    json += F("\"state\":\"");
+    json += routerState;
+    json += F("\",\"connectionDetected\":");
+    appendBoolean(json, gatewayAssigned);
+    json += F(",\"suspectedDown\":");
+    appendBoolean(json, routerSuspectedDown);
+    json += F(",\"ethernetLinked\":");
+    appendBoolean(json, network.linkUp);
+    json += F(",\"dhcpReady\":");
+    appendBoolean(json, network.dhcpReady);
+    json += F(",\"gatewayAssigned\":");
+    appendBoolean(json, gatewayAssigned);
+    json += F(",\"gateway\":\"");
+    json += gatewayAssigned ? network.gateway.toString() : String("--");
+    json += F("\",\"reason\":\"");
+    json += routerReason;
+    json += '"';
 
     json += F("},\"portProbes\":{");
     json += F("\"targetAvailable\":");
