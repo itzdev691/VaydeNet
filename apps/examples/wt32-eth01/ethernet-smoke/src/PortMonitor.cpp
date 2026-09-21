@@ -21,8 +21,14 @@ void PortMonitor::update(uint32_t nowMs) {
         return;
     }
 
-    if (!targetAvailable_ || target_ != network.gateway) {
-        reset(network.gateway, true);
+    const IPAddress probeTarget(
+        AppConfig::kProbeTargetOctets[0],
+        AppConfig::kProbeTargetOctets[1],
+        AppConfig::kProbeTargetOctets[2],
+        AppConfig::kProbeTargetOctets[3]);
+
+    if (!targetAvailable_ || target_ != probeTarget) {
+        reset(probeTarget, true);
     }
 
     if (nowMs - lastProbeMs_ < AppConfig::kPortProbeIntervalMs) {
@@ -66,7 +72,7 @@ PortMonitor::Snapshot PortMonitor::snapshot() const {
 
 void PortMonitor::printStatus() const {
     if (!targetAvailable_) {
-        Serial.println("TCP probes: waiting for DHCP gateway");
+        Serial.println("TCP probes: waiting for Ethernet and DHCP");
         return;
     }
 

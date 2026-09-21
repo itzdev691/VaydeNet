@@ -13,7 +13,7 @@ broadcast path and experimental EtherType `0x88B5` are no longer used.
 ```text
 LAN8720 Ethernet status
         |
-        +--> DHCP gateway TCP probes
+        +--> configured host TCP probes
         |          |
         |          +--> LittleFS dashboard and /api/status
         |          +--> compact packet telemetry
@@ -61,20 +61,21 @@ ethernet-smoke/
 
 - `EthernetNetwork` owns LAN8720 link, DHCP, addressing, and link diagnostics.
 - `PortMonitor` probes one configured TCP port every two seconds against the
-  DHCP gateway and retains the latest result for each port.
+  configured LAN host and retains the latest result for each port.
 - `VaydeBroadcaster` owns Wi-Fi station mode, ESP-NOW channel and peer setup,
   packet construction, transmission, and sender-side statistics.
 - `WebDashboard` serves the LittleFS assets and live Ethernet, TCP-probe, and
   ESP-NOW status.
-- `AppConfig` owns the dashboard port, ESP-NOW channel, probe ports, and timing
-  constants.
+- `AppConfig` owns the dashboard port, ESP-NOW channel, probe target, probe
+  ports, and timing constants.
 
 ## TCP port probes
 
-The default probe target is the DHCP gateway. The configured ports are `8080`,
-`42691`, `9443`, and `8081`; edit `kProbePorts` in `include/AppConfig.h` to
-change them. The firmware probes one port every two seconds with a 250 ms
-connection timeout, so a complete four-port sweep takes about eight seconds.
+The default probe target is `192.168.1.100`. Edit `kProbeTargetOctets` in
+`include/AppConfig.h` to change it. The configured ports are `8080`, `42691`,
+`9443`, and `8081`; edit `kProbePorts` in the same file to change them. The
+firmware probes one port every two seconds with a 250 ms connection timeout, so
+a complete four-port sweep takes about eight seconds.
 
 These are TCP connection probes, not ICMP pings. `Open` means the TCP handshake
 succeeded. `Unavailable` combines connection refusal, timeout, and routing
