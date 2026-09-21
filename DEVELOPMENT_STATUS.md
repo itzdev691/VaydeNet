@@ -1,6 +1,6 @@
 # VaydeNet Development Status
 
-Snapshot: September 18, 2026
+Snapshot: September 20, 2026
 
 Target bootstrap-branch completion: September 18, 2026
 
@@ -137,6 +137,21 @@ The engine rejects repeated startup, a missing board model, unsupported protocol
 
 `VaydeEngine::start()` remains dependency validation and binding only. After startup, the node application's existing FreeRTOS `app_main` task repeatedly calls `VaydeEngine::processNextPacket()`. The engine performs one nonblocking transport receive attempt per call. A received frame is removed from the queue, validated, decoded into a `Message`, and delivered through `MessageSink`. `EngineProcessResult` preserves the validation outcome without exposing raw packet data. The node's concrete sink logs logical-message metadata but does not retain or relay traffic.
 
+### Outbound message encoding primitive
+
+`packages/VaydeEngine/include/VaydeNet/message/OutboundMessage.h` defines the
+transport-independent content for a locally originated message. Destination and
+transport options are excluded so routing and adapter concerns do not become
+part of the logical message.
+
+`encodeOutboundMessage()` currently supports prototype type `1`, requires a
+nonzero TTL, bounds the payload to 200 bytes, clears the output packet before
+every result, supplies packet version `1`, copies the caller-provided sender and
+sequence values, and calculates CRC-16/CCITT-FALSE last. The resulting packet
+passes the existing validator. This is an encoding primitive only; it is not yet
+connected to `VaydeEngine`, `TransportInterface`, ESP-NOW peer management, or a
+send-completion path.
+
 ### ESP-NOW adapter initialization
 
 `packages/adapters/esp-now/EspNowTransport.cpp` currently performs:
@@ -263,9 +278,26 @@ After flashing compatible sender and node firmware, the user confirmed that node
 
 On September 18, 2026, the sanitizer-backed host suite passed packet layout, packet validation, VaydeEngine processing, logical-message decoding and dispatch, sink rejection, unsupported-type rejection, decoder length rejection, and ESP-NOW receive-queue tests. `git diff --check` passed. A clean `espnow_esp32s3_mini` build compiled `NodeMessageSink.cpp` and `PacketMessageDecoder.cpp`, archived them into the firmware components, and linked successfully. The image used 36,728 bytes of RAM and 741,925 bytes of flash. This proves deterministic host behavior and firmware integration only; the new decoder-to-sink path has not been flashed or observed on hardware.
 
+On September 20, 2026, the sanitizer-backed host suite added outbound-message
+encoding coverage. It verified valid type-1 encoding, identity and sequence
+assignment, payload copying, zeroed unused bytes, CRC validity, maximum-length
+payload handling, rejection of invalid type, TTL, and length values, and output
+clearing for every rejected message. This does not prove transport transmission
+or hardware delivery.
+
+An `espnow_esp32s3_mini` integration-build attempt stopped during ESP-IDF build
+setup before project-source compilation because two framework paths generated
+the same `esp_efuse_fields.c.o` target. The encoder therefore has host-test and
+component-registration proof, but no new firmware compile or link proof.
+
 ## Repository State
 
-The active development branch observed on September 18, 2026 is `itzdev691/packet-processing`. It includes the portable receive contract, ESP-NOW adapter translation, host receive-queue regression test, VaydeEngine validation and logical-message dispatch stage, node packet-processing loop, and compatible ESP-NOW sender. `apps/node/dependencies.lock` remains target-sensitive and may change when another node environment is built, so this does not establish a stable multi-target lock policy.
+The development branch observed on September 18, 2026 was `itzdev691/packet-processing`. It includes the portable receive contract, ESP-NOW adapter translation, host receive-queue regression test, VaydeEngine validation and logical-message dispatch stage, node packet-processing loop, and compatible ESP-NOW sender. `apps/node/dependencies.lock` remains target-sensitive and may change when another node environment is built, so this does not establish a stable multi-target lock policy.
+
+The active branch on September 20, 2026 is
+`14-remodeling-node-package-into-txrx`. It adds only the bounded outbound-message
+encoding primitive and its host tests. Transport transmission, send completion,
+destination handling, and relay remain outside this commit.
 
 `EngineStartupContext` is constructed from bootstrap-owned hardware identity, node settings, the selected initialized transport, and `NodeMessageSink`. `VaydeEngine::start()` validates and retains those dependencies. The application loop asks the engine to process queued frames; the engine validates, decodes, and dispatches supported messages without returning raw packet data through bootstrap. Persistent message retention remains absent.
 

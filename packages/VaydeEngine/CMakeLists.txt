@@ -3,6 +3,7 @@ idf_component_register(
         "src/VaydeEngine.cpp"
         "src/PacketValidation.cpp"
         "src/PacketMessageDecoder.cpp"
+        "src/PacketMessageEncoder.cpp"
     INCLUDE_DIRS
         "include"
 )
