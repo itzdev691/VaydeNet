@@ -23,6 +23,8 @@ public:
     bool configureChannel(std::uint16_t channel);
     TransportStatus initialize() override;
     TransportReceiveStatus tryReceive(Packet& packet) override;
+    TransportTransmitStatus tryTransmit(const Packet& packet) override;
+    TransportTransmitCompletionStatus pollTransmitCompletion() override;
 
     void setReceiveActivityCallback(
         EspNowReceiveActivityCallback callback,

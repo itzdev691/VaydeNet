@@ -213,3 +213,12 @@ TransportReceiveStatus EspNowTransport::tryReceive(Packet& packet) {
 
     return TransportReceiveStatus::Received;
 }
+
+TransportTransmitStatus EspNowTransport::tryTransmit(const Packet&) {
+    return TransportTransmitStatus::Unavailable;
+}
+
+TransportTransmitCompletionStatus
+EspNowTransport::pollTransmitCompletion() {
+    return TransportTransmitCompletionStatus::Unavailable;
+}

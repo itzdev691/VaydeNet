@@ -24,6 +24,14 @@ public:
         return TransportReceiveStatus::Received;
     }
 
+    TransportTransmitStatus tryTransmit(const Packet&) override {
+        return TransportTransmitStatus::Unavailable;
+    }
+
+    TransportTransmitCompletionStatus pollTransmitCompletion() override {
+        return TransportTransmitCompletionStatus::Unavailable;
+    }
+
     Packet queued_packet{};
     std::uint32_t receive_attempts{};
 };

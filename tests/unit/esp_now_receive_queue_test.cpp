@@ -185,6 +185,18 @@ void vQueueDelete(QueueHandle_t queue) {
 int main() {
     EspNowTransport transport;
     Packet received_packet{};
+    const Packet transmit_packet = makePacket(0);
+
+    expect(
+        transport.tryTransmit(transmit_packet) ==
+            TransportTransmitStatus::Unavailable,
+        "ESP-NOW transport exposed unimplemented transmission"
+    );
+    expect(
+        transport.pollTransmitCompletion() ==
+            TransportTransmitCompletionStatus::Unavailable,
+        "ESP-NOW transport exposed unimplemented send completion"
+    );
 
     expect(
         transport.tryReceive(received_packet) ==
@@ -200,6 +212,16 @@ int main() {
     expect(
         transport.initialize() == TransportStatus::Ok,
         "transport initialization failed"
+    );
+    expect(
+        transport.tryTransmit(transmit_packet) ==
+            TransportTransmitStatus::Unavailable,
+        "initialized ESP-NOW transport exposed unimplemented transmission"
+    );
+    expect(
+        transport.pollTransmitCompletion() ==
+            TransportTransmitCompletionStatus::Unavailable,
+        "initialized ESP-NOW transport exposed unimplemented send completion"
     );
     expect(
         transport.tryReceive(received_packet) ==
