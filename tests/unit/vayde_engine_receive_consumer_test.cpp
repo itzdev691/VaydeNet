@@ -27,6 +27,14 @@ public:
         return receive_status;
     }
 
+    TransportTransmitStatus tryTransmit(const Packet&) override {
+        return TransportTransmitStatus::Unavailable;
+    }
+
+    TransportTransmitCompletionStatus pollTransmitCompletion() override {
+        return TransportTransmitCompletionStatus::Unavailable;
+    }
+
     TransportReceiveStatus receive_status{
         TransportReceiveStatus::Empty
     };

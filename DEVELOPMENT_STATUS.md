@@ -1,6 +1,6 @@
 # VaydeNet Development Status
 
-Snapshot: September 20, 2026
+Snapshot: September 21, 2026
 
 Target bootstrap-branch completion: September 18, 2026
 
@@ -118,16 +118,26 @@ Only `transport` and `channel` are stored and loaded. Node ID, network ID, versi
 
 ### Transport boundary
 
-`packages/VaydeEngine/include/VaydeNet/transport/TransportInterface.h` defines portable initialization and nonblocking receive contracts:
+`packages/VaydeEngine/include/VaydeNet/transport/TransportInterface.h` defines portable initialization, nonblocking receive, and nonblocking transmit contracts:
 
 ```text
 TransportInterface::initialize() -> TransportStatus
 TransportInterface::tryReceive(Packet&) -> TransportReceiveStatus
+TransportInterface::tryTransmit(const Packet&) -> TransportTransmitStatus
+TransportInterface::pollTransmitCompletion() -> TransportTransmitCompletionStatus
 ```
 
 `TransportReceiveStatus` distinguishes `Received`, `Empty`, and `NotInitialized`. The contract includes the current `Packet` prototype directly so every adapter implementation uses the same complete type.
 
 `EspNowTransport` overrides this method and translates its FreeRTOS queue result into the portable status. Queue ownership, callback registration, and ESP-NOW-specific buffering remain private to the adapter. `VaydeEngine::processNextPacket()` calls this contract and maps transport, validation, decoding, and sink outcomes into `EngineProcessResult` without importing FreeRTOS or ESP-NOW headers into the engine. Raw `Packet` values remain internal to the engine and never cross the bootstrap boundary.
+
+The transmit contract separates immediate submission from asynchronous
+completion. Submission can report `Queued`, `Busy`, `NotInitialized`,
+`Unavailable`, or `Failed`; completion polling can report `Sent`, `Failed`,
+`Pending`, `Empty`, `NotInitialized`, or `Unavailable`. The current
+`EspNowTransport` implementation returns `Unavailable` for both methods. This
+keeps the absent capability explicit while ESP-NOW peer registration, packet
+submission, and callback-driven completion remain unimplemented.
 
 ### VaydeEngine startup handoff
 
@@ -149,8 +159,8 @@ nonzero TTL, bounds the payload to 200 bytes, clears the output packet before
 every result, supplies packet version `1`, copies the caller-provided sender and
 sequence values, and calculates CRC-16/CCITT-FALSE last. The resulting packet
 passes the existing validator. This is an encoding primitive only; it is not yet
-connected to `VaydeEngine`, `TransportInterface`, ESP-NOW peer management, or a
-send-completion path.
+connected to `VaydeEngine` or submitted through the new transport transmit
+contract.
 
 ### ESP-NOW adapter initialization
 
@@ -290,14 +300,28 @@ setup before project-source compilation because two framework paths generated
 the same `esp_efuse_fields.c.o` target. The encoder therefore has host-test and
 component-registration proof, but no new firmware compile or link proof.
 
+On September 21, 2026, the portable transport boundary added nonblocking
+transmit submission and completion-polling contracts. The production
+`EspNowTransport` and host fakes implement the new pure virtual methods, while
+the adapter deliberately reports `Unavailable` until its ESP-NOW send path is
+implemented. The adapter host test verifies this explicit result before and
+after initialization while retaining its receive-queue coverage. All six
+sanitizer-backed host tests passed. A clean `espnow_esp32s3_mini` build compiled
+and linked the new interface and adapter methods under ESP-IDF 5.5.4, using
+36,728 bytes of RAM and 742,053 bytes of flash. This contract and build do not
+prove packet submission, send callbacks, radio transmission, or peer delivery;
+no firmware was flashed.
+
 ## Repository State
 
 The development branch observed on September 18, 2026 was `itzdev691/packet-processing`. It includes the portable receive contract, ESP-NOW adapter translation, host receive-queue regression test, VaydeEngine validation and logical-message dispatch stage, node packet-processing loop, and compatible ESP-NOW sender. `apps/node/dependencies.lock` remains target-sensitive and may change when another node environment is built, so this does not establish a stable multi-target lock policy.
 
-The active branch on September 20, 2026 is
-`14-remodeling-node-package-into-txrx`. It adds only the bounded outbound-message
-encoding primitive and its host tests. Transport transmission, send completion,
-destination handling, and relay remain outside this commit.
+The active branch on September 21, 2026 is
+`14-remodeling-node-package-into-txrx`. It contains the bounded outbound-message
+encoding primitive and a portable nonblocking transmit contract whose ESP-NOW
+implementation explicitly reports `Unavailable`. Actual transport
+transmission, send completion, destination handling, and relay remain outside
+the implemented checkpoint.
 
 `EngineStartupContext` is constructed from bootstrap-owned hardware identity, node settings, the selected initialized transport, and `NodeMessageSink`. `VaydeEngine::start()` validates and retains those dependencies. The application loop asks the engine to process queued frames; the engine validates, decodes, and dispatches supported messages without returning raw packet data through bootstrap. Persistent message retention remains absent.
 
