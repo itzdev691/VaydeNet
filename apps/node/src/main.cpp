@@ -1,7 +1,9 @@
 #include "bootstrap/NodeBootstrap.h"
 
+#include <algorithm>
 #include <cstdint>
 
+#include "VaydeNet/transmit/TransmitRequest.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -9,7 +11,75 @@
 namespace {
 
 constexpr char kLogTag[] = "NodeBootstrap";
-constexpr std::uint32_t kReceivePollIntervalMs = 10;
+constexpr std::uint32_t kNodePollIntervalMs = 10;
+constexpr char kStartupPayload[] = "VaydeNet node online";
+
+static_assert(
+    sizeof(kStartupPayload) - 1 <= kMaximumOutboundPayloadSize,
+    "Startup message exceeds outbound payload capacity"
+);
+
+TransmitRequest makeStartupTransmitRequest() {
+    TransmitRequest request{};
+    request.destination = TransmitDestination::Broadcast;
+    request.message.type = 1;
+    request.message.flags = 0;
+    request.message.ttl = 1;
+    request.message.payload_length =
+        static_cast<std::uint16_t>(sizeof(kStartupPayload) - 1);
+
+    std::copy_n(
+        kStartupPayload,
+        request.message.payload_length,
+        request.message.payload.begin()
+    );
+
+    return request;
+}
+
+bool submitStartupMessage(NodeBootstrap& bootstrap) {
+    const TransmitRequest request = makeStartupTransmitRequest();
+
+    switch (bootstrap.tryTransmit(request)) {
+        case EngineTransmitStatus::Queued:
+            ESP_LOGI(kLogTag, "Startup message queued");
+            return true;
+
+        case EngineTransmitStatus::Busy:
+            ESP_LOGW(kLogTag, "Transmit transport is busy");
+            break;
+
+        case EngineTransmitStatus::InvalidMessageType:
+            ESP_LOGE(kLogTag, "Invalid startup message type");
+            break;
+
+        case EngineTransmitStatus::InvalidMessageTtl:
+            ESP_LOGE(kLogTag, "Invalid startup message TTL");
+            break;
+
+        case EngineTransmitStatus::InvalidMessageLength:
+            ESP_LOGE(kLogTag, "Invalid startup message length");
+            break;
+
+        case EngineTransmitStatus::NotStarted:
+            ESP_LOGE(kLogTag, "VaydeEngine is not started");
+            break;
+
+        case EngineTransmitStatus::TransportNotReady:
+            ESP_LOGE(kLogTag, "Transmit transport is not ready");
+            break;
+
+        case EngineTransmitStatus::Unavailable:
+            ESP_LOGE(kLogTag, "Transmit capability is unavailable");
+            break;
+
+        case EngineTransmitStatus::Failed:
+            ESP_LOGE(kLogTag, "Startup message submission failed");
+            break;
+    }
+
+    return false;
+}
 
 const char* packetValidationStatusName(PacketValidationStatus status) {
     switch (status) {
@@ -38,8 +108,8 @@ const char* packetValidationStatusName(PacketValidationStatus status) {
     return "unknown validation result";
 }
 
-void runPacketProcessor(NodeBootstrap& bootstrap) {
-    ESP_LOGI(kLogTag, "VaydeEngine packet processor started");
+void runNodeLoop(NodeBootstrap& bootstrap, bool transmit_pending) {
+    ESP_LOGI(kLogTag, "VaydeEngine node loop started");
 
     while (true) {
         const EngineProcessResult process_result =
@@ -88,7 +158,44 @@ void runPacketProcessor(NodeBootstrap& bootstrap) {
                 return;
         }
 
-        vTaskDelay(pdMS_TO_TICKS(kReceivePollIntervalMs));
+        if (transmit_pending) {
+            switch (bootstrap.pollTransmitCompletion()) {
+                case EngineTransmitCompletionStatus::Sent:
+                    ESP_LOGI(kLogTag, "Startup message sent");
+                    transmit_pending = false;
+                    break;
+
+                case EngineTransmitCompletionStatus::Failed:
+                    ESP_LOGE(kLogTag, "Startup message send failed");
+                    transmit_pending = false;
+                    break;
+
+                case EngineTransmitCompletionStatus::Pending:
+                    break;
+
+                case EngineTransmitCompletionStatus::Empty:
+                    ESP_LOGW(kLogTag, "Startup message completion is empty");
+                    transmit_pending = false;
+                    break;
+
+                case EngineTransmitCompletionStatus::NotStarted:
+                    ESP_LOGE(kLogTag, "VaydeEngine is not started");
+                    transmit_pending = false;
+                    break;
+
+                case EngineTransmitCompletionStatus::TransportNotReady:
+                    ESP_LOGE(kLogTag, "Transmit transport is not ready");
+                    transmit_pending = false;
+                    break;
+
+                case EngineTransmitCompletionStatus::Unavailable:
+                    ESP_LOGE(kLogTag, "Transmit completion is unavailable");
+                    transmit_pending = false;
+                    break;
+            }
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(kNodePollIntervalMs));
     }
 }
 
@@ -147,5 +254,6 @@ extern "C" void app_main() {
             return;
     }
 
-    runPacketProcessor(bootstrap);
+    const bool transmit_pending = submitStartupMessage(bootstrap);
+    runNodeLoop(bootstrap, transmit_pending);
 }
