@@ -134,10 +134,11 @@ TransportInterface::pollTransmitCompletion() -> TransportTransmitCompletionStatu
 The transmit contract separates immediate submission from asynchronous
 completion. Submission can report `Queued`, `Busy`, `NotInitialized`,
 `Unavailable`, or `Failed`; completion polling can report `Sent`, `Failed`,
-`Pending`, `Empty`, `NotInitialized`, or `Unavailable`. The current
-`EspNowTransport` implementation returns `Unavailable` for both methods. This
-keeps the absent capability explicit while ESP-NOW peer registration, packet
-submission, and callback-driven completion remain unimplemented.
+`Pending`, `Empty`, `NotInitialized`, or `Unavailable`. `EspNowTransport`
+implements a bounded broadcast send path with one outstanding packet. It maps
+accepted `esp_now_send()` submissions to `Queued`, rejects concurrent
+submissions as `Busy`, and exposes callback-delivered `Sent` or `Failed`
+results through nonblocking completion polling.
 
 ### VaydeEngine startup handoff
 
@@ -158,9 +159,16 @@ part of the logical message.
 nonzero TTL, bounds the payload to 200 bytes, clears the output packet before
 every result, supplies packet version `1`, copies the caller-provided sender and
 sequence values, and calculates CRC-16/CCITT-FALSE last. The resulting packet
-passes the existing validator. This is an encoding primitive only; it is not yet
-connected to `VaydeEngine` or submitted through the new transport transmit
-contract.
+passes the existing validator. `VaydeEngine::tryTransmit()` now uses this
+primitive to assign the node-derived sender ID and engine-owned sequence number
+before submitting the packet through the portable transport contract. Engine
+completion polling maps the portable completion states without exposing the
+concrete adapter. Application-level invocation remains incomplete.
+
+The prototype sender ID packs the six `HardwareIdentity::device_uid` bytes in
+array order into the low 48 bits of the packet's 64-bit sender field, leaving
+the high 16 bits zero. The engine starts its local sequence at `0` and advances
+it only when the transport accepts a submission as `Queued`.
 
 ### ESP-NOW adapter initialization
 
@@ -176,13 +184,24 @@ contract.
 8. primary-channel application through `esp_wifi_set_channel()`;
 9. ESP-NOW initialization;
 10. creation of a four-slot FreeRTOS queue sized for the current 220-byte `Packet`;
-11. ESP-NOW receive-callback registration.
+11. creation of a one-slot transmit-completion queue;
+12. ESP-NOW receive- and send-callback registration;
+13. unencrypted broadcast-peer registration on the configured station channel.
 
 The accepted configured channel range is `1` through `14`. Initialization is rejected when no channel has been configured. Reinitialization returns success after a successful first initialization.
 
 The receive callback rejects null metadata, null source addresses, null payload pointers, and non-positive lengths. For accepted callbacks, it logs the sender MAC address and received byte count. It then accepts only frames whose length equals `sizeof(Packet)`, copies them into a local `Packet`, requests the configured activity indication, and uses nonblocking `xQueueSend(..., 0)` to copy them into the receive queue. A full queue causes the new packet to be dropped and logged rather than blocking the Wi-Fi callback; the activity indication has already been requested because it currently represents receipt rather than queue acceptance or processing.
 
-`tryReceive(Packet&)` uses nonblocking `xQueueReceive(..., 0)` and distinguishes `Received`, `Empty`, and `NotInitialized`. VaydeEngine calls it through the portable interface from the node's packet-processing loop. Polling starts only after successful bootstrap and occurs every 10 ms, allowing queued frames to be drained outside the Wi-Fi callback. The adapter does not register peers, transmit data, register a send-completion callback, or perform fragmentation and reassembly.
+`tryReceive(Packet&)` uses nonblocking `xQueueReceive(..., 0)` and distinguishes `Received`, `Empty`, and `NotInitialized`. VaydeEngine calls it through the portable interface from the node's packet-processing loop. Polling starts only after successful bootstrap and occurs every 10 ms, allowing queued frames to be drained outside the Wi-Fi callback.
+
+`tryTransmit(const Packet&)` sends the complete 220-byte packet to the ESP-NOW
+broadcast address. It permits one outstanding transmission and reports
+`NotInitialized`, `Busy`, `Failed`, or `Queued`. The send callback performs only
+a nonblocking completion-queue write; `pollTransmitCompletion()` reports
+`Pending`, `Sent`, `Failed`, or `Empty`. Shutdown removes the broadcast peer,
+unregisters both callbacks, deletes both queues, and clears pending state. The
+adapter still does not perform fragmentation, retries, acknowledgement,
+unicast discovery, routing, or relay.
 
 ## Existing Packet and Experiments
 
@@ -238,8 +257,8 @@ The current checkpoint does not include:
 - an operator-controlled production provisioning, update, reset, or migration workflow;
 - loading the full `NodeSettings` schema;
 - tests for empty, missing, corrupt, valid, and unsupported stored settings;
-- ESP-NOW peer management;
-- ESP-NOW transmission and send-completion handling;
+- node/application orchestration for locally originated transmissions;
+- hardware proof of reusable-adapter transmission and peer delivery;
 - hardware validation of controlled packet rejection, sustained queue draining under load, and logical-message sink delivery;
 - a common serialized VaydeNet message contract;
 - finalized protocol identity, message types, capability discovery, or authentication;
@@ -312,16 +331,32 @@ and linked the new interface and adapter methods under ESP-IDF 5.5.4, using
 prove packet submission, send callbacks, radio transmission, or peer delivery;
 no firmware was flashed.
 
+On September 25, 2026, the bounded ESP-NOW adapter send path added broadcast
+peer registration, full-`Packet` submission, one-outstanding-send enforcement,
+callback-safe completion buffering, completion polling, and shutdown cleanup.
+The expanded sanitizer-backed host suite passed, including queued, busy,
+pending, sent, callback-failed, immediate-failure, and cleanup outcomes. A
+focused engine TX test also verifies pre-start rejection, encoding failures,
+transport and completion mapping, stable device-UID conversion, payload and CRC
+validity, and sequence advancement only after accepted submission. A
+clean `espnow_esp32s3_mini` build compiled and linked the adapter under ESP-IDF
+5.5.4, using 36,736 bytes of RAM and 747,805 bytes of flash. The engine now
+encodes and submits caller-provided `TransmitRequest` values and maps completion
+polling through `NodeBootstrap`; the node application trigger remains absent.
+No firmware was flashed; radio transmission and peer delivery remain unproven.
+
 ## Repository State
 
 The development branch observed on September 18, 2026 was `itzdev691/packet-processing`. It includes the portable receive contract, ESP-NOW adapter translation, host receive-queue regression test, VaydeEngine validation and logical-message dispatch stage, node packet-processing loop, and compatible ESP-NOW sender. `apps/node/dependencies.lock` remains target-sensitive and may change when another node environment is built, so this does not establish a stable multi-target lock policy.
 
-The active branch on September 21, 2026 is
+The active branch on September 25, 2026 is
 `14-remodeling-node-package-into-txrx`. It contains the bounded outbound-message
-encoding primitive and a portable nonblocking transmit contract whose ESP-NOW
-implementation explicitly reports `Unavailable`. Actual transport
-transmission, send completion, destination handling, and relay remain outside
-the implemented checkpoint.
+encoding primitive, the portable nonblocking transmit contract, and a bounded
+ESP-NOW broadcast implementation with callback-delivered completion. Engine
+submission and completion mapping are connected through `NodeBootstrap`.
+Application submission, runtime radio proof, broader destination handling,
+retries, acknowledgements, routing, and relay remain outside the implemented
+checkpoint.
 
 `EngineStartupContext` is constructed from bootstrap-owned hardware identity, node settings, the selected initialized transport, and `NodeMessageSink`. `VaydeEngine::start()` validates and retains those dependencies. The application loop asks the engine to process queued frames; the engine validates, decodes, and dispatches supported messages without returning raw packet data through bootstrap. Persistent message retention remains absent.
 
@@ -331,7 +366,7 @@ The branch contains the cumulative node-bootstrap implementation relative to `ma
 
 ## Merge Readiness
 
-The current software boundary ends after VaydeEngine dequeues one packet, validates version, type, TTL, length, and CRC, decodes supported prototype type `1` into a `Message`, and dispatches it through `MessageSink`. It includes node-side logging of delivered logical-message metadata and explicit validation, decoding, and sink outcomes. It does not claim hardware proof of the new path, message retention, reusable-adapter transmission, peer management, authentication, routing, relay behavior, production provisioning, or finalized cross-transport serialization.
+The receive boundary ends after VaydeEngine dequeues one packet, validates version, type, TTL, length, and CRC, decodes supported prototype type `1` into a `Message`, and dispatches it through `MessageSink`. The engine transmit boundary accepts a broadcast `TransmitRequest`, encodes it with node identity and an engine-owned sequence, submits it through the adapter, and maps asynchronous completion through bootstrap forwarding. The node application trigger remains absent. This does not claim runtime adapter transmission, peer delivery, message retention, authentication, routing, relay behavior, production provisioning, or finalized cross-transport serialization.
 
 ## Implemented Checkpoint: Decode and Dispatch Validated Packets
 
@@ -359,7 +394,7 @@ The CRC field is compared directly with the computed `std::uint16_t` value; a tr
 5. `VaydeEngine::processNextPacket()` retains raw packets internally and returns an `EngineProcessResult` containing only processing status and validation status.
 6. `NodeBootstrap` owns `NodeMessageSink`, connects it through `EngineStartupContext`, and forwards only the engine processing result.
 7. `apps/node/src/main.cpp` retains the 10 ms scheduling loop and handles processing failures without interpreting raw packet data.
-8. `EspNowTransport` remains unchanged. Its callback owns callback-argument checks, exact frame-size checks, copying, queue insertion, and receive-activity notification only.
+8. `EspNowTransport` retains the receive callback boundary and now separately owns broadcast-peer registration, packet submission, and callback-safe transmit completion buffering.
 
 ### Test and completion evidence
 
@@ -377,4 +412,4 @@ Historical user-confirmed node output proves the compatible sender exercised the
 4. Exercise missing-key, invalid-transport, invalid-channel, valid-settings, NVS-read-failure, and NVS-write-failure paths.
 5. Replace automatic development defaults with an operator-controlled production provisioning contract before deployment.
 6. Add a bounded persistent inbox or application handler behind `MessageSink`; the current implementation logs delivered messages only.
-7. Add ESP-NOW peer management, transmission, and send-completion handling behind the adapter boundary.
+7. Add the bounded startup-message trigger, then flash and capture runtime transmission and peer-delivery evidence.

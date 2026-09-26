@@ -12,6 +12,10 @@
 
 namespace {
 
+constexpr UBaseType_t kTransmitCompletionQueueDepth = 1;
+constexpr std::uint8_t kBroadcastAddress[ESP_NOW_ETH_ALEN] = {
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF
+};
 constexpr std::uint16_t kMinimumWifiChannel = 1;
 constexpr std::uint16_t kMaximumWifiChannel = 14;
 constexpr UBaseType_t kReceiveQueueDepth = 4;
@@ -27,6 +31,11 @@ EspNowTransport::~EspNowTransport() {
 
 void EspNowTransport::shutdown() {
     if (active_instance_ == this) {
+        if (initialized_) {
+            (void)esp_now_del_peer(kBroadcastAddress);
+        }
+
+        (void)esp_now_unregister_send_cb();
         (void)esp_now_unregister_recv_cb();
         active_instance_ = nullptr;
     }
@@ -41,8 +50,14 @@ void EspNowTransport::shutdown() {
         receive_queue_ = nullptr;
     }
 
+    if (transmit_completion_queue_ != nullptr) {
+        vQueueDelete(transmit_completion_queue_);
+        transmit_completion_queue_ = nullptr;
+    }
+
     receive_activity_callback_ = nullptr;
     receive_activity_context_ = nullptr;
+    transmit_pending_ = false;
 }
 
 void EspNowTransport::setReceiveActivityCallback(
@@ -188,10 +203,57 @@ TransportStatus EspNowTransport::initialize() {
         return TransportStatus::InitializationFailed;
     }
 
+    transmit_completion_queue_ = xQueueCreate(
+        kTransmitCompletionQueueDepth,
+        sizeof(TransportTransmitCompletionStatus)
+    );
+
+    if (transmit_completion_queue_ == nullptr) {
+        vQueueDelete(receive_queue_);
+        receive_queue_ = nullptr;
+        (void)esp_now_deinit();
+        return TransportStatus::InitializationFailed;
+    }
+
     active_instance_ = this;
 
     if (esp_now_register_recv_cb(EspNowTransport::onDataReceived) != ESP_OK) {
         active_instance_ = nullptr;
+        vQueueDelete(transmit_completion_queue_);
+        transmit_completion_queue_ = nullptr;
+        vQueueDelete(receive_queue_);
+        receive_queue_ = nullptr;
+        (void)esp_now_deinit();
+        return TransportStatus::InitializationFailed;
+    }
+
+    if (esp_now_register_send_cb(EspNowTransport::onDataSent) != ESP_OK) {
+        (void)esp_now_unregister_recv_cb();
+        active_instance_ = nullptr;
+        vQueueDelete(transmit_completion_queue_);
+        transmit_completion_queue_ = nullptr;
+        vQueueDelete(receive_queue_);
+        receive_queue_ = nullptr;
+        (void)esp_now_deinit();
+        return TransportStatus::InitializationFailed;
+    }
+
+    esp_now_peer_info_t broadcast_peer{};
+    std::memcpy(
+        broadcast_peer.peer_addr,
+        kBroadcastAddress,
+        sizeof(kBroadcastAddress)
+    );
+    broadcast_peer.channel = channel_;
+    broadcast_peer.ifidx = WIFI_IF_STA;
+    broadcast_peer.encrypt = false;
+
+    if (esp_now_add_peer(&broadcast_peer) != ESP_OK) {
+        (void)esp_now_unregister_send_cb();
+        (void)esp_now_unregister_recv_cb();
+        active_instance_ = nullptr;
+        vQueueDelete(transmit_completion_queue_);
+        transmit_completion_queue_ = nullptr;
         vQueueDelete(receive_queue_);
         receive_queue_ = nullptr;
         (void)esp_now_deinit();
@@ -214,11 +276,76 @@ TransportReceiveStatus EspNowTransport::tryReceive(Packet& packet) {
     return TransportReceiveStatus::Received;
 }
 
-TransportTransmitStatus EspNowTransport::tryTransmit(const Packet&) {
-    return TransportTransmitStatus::Unavailable;
+TransportTransmitStatus EspNowTransport::tryTransmit(const Packet& packet) {
+    if (!initialized_ || transmit_completion_queue_ == nullptr) {
+        return TransportTransmitStatus::NotInitialized;
+    }
+
+    if (transmit_pending_) {
+        return TransportTransmitStatus::Busy;
+    }
+
+    transmit_pending_ = true;
+
+    if (
+        esp_now_send(
+            kBroadcastAddress,
+            reinterpret_cast<const std::uint8_t*>(&packet),
+            sizeof(packet)
+        ) != ESP_OK
+    ) {
+        transmit_pending_ = false;
+        return TransportTransmitStatus::Failed;
+    }
+
+    return TransportTransmitStatus::Queued;
 }
 
 TransportTransmitCompletionStatus
 EspNowTransport::pollTransmitCompletion() {
-    return TransportTransmitCompletionStatus::Unavailable;
+    if (!initialized_ || transmit_completion_queue_ == nullptr) {
+        return TransportTransmitCompletionStatus::NotInitialized;
+    }
+
+    TransportTransmitCompletionStatus completion{};
+
+    if (
+        xQueueReceive(
+            transmit_completion_queue_,
+            &completion,
+            0
+        ) == pdTRUE
+    ) {
+        transmit_pending_ = false;
+        return completion;
+    }
+
+    if (transmit_pending_) {
+        return TransportTransmitCompletionStatus::Pending;
+    }
+
+    return TransportTransmitCompletionStatus::Empty;
+}
+
+void EspNowTransport::onDataSent(
+    const esp_now_send_info_t*,
+    esp_now_send_status_t status
+) {
+    if (
+        active_instance_ == nullptr ||
+        active_instance_->transmit_completion_queue_ == nullptr
+    ) {
+        return;
+    }
+
+    const TransportTransmitCompletionStatus completion =
+        status == ESP_NOW_SEND_SUCCESS
+            ? TransportTransmitCompletionStatus::Sent
+            : TransportTransmitCompletionStatus::Failed;
+
+    (void)xQueueSend(
+        active_instance_->transmit_completion_queue_,
+        &completion,
+        0
+    );
 }
