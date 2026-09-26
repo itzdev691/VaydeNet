@@ -21,6 +21,11 @@ struct FakeQueue {
 };
 
 esp_now_recv_cb_t registered_receive_callback = nullptr;
+esp_now_send_cb_t registered_send_callback = nullptr;
+bool broadcast_peer_registered = false;
+esp_err_t next_send_result = ESP_OK;
+std::uint8_t last_send_address[ESP_NOW_ETH_ALEN]{};
+std::vector<std::uint8_t> last_sent_data;
 int receive_activity_count = 0;
 
 [[noreturn]] void fail(const char* message) {
@@ -78,6 +83,16 @@ void deliverFrame(const Packet& packet) {
     );
 }
 
+void completeSend(esp_now_send_status_t status) {
+    expect(
+        registered_send_callback != nullptr,
+        "ESP-NOW send callback was not registered"
+    );
+
+    const esp_now_send_info_t send_info{};
+    registered_send_callback(&send_info, status);
+}
+
 }  // namespace
 
 void testEspLog(const char*, const char*, ...) {}
@@ -130,6 +145,63 @@ esp_err_t esp_now_unregister_recv_cb() {
     registered_receive_callback = nullptr;
     return ESP_OK;
 }
+
+esp_err_t esp_now_register_send_cb(esp_now_send_cb_t callback) {
+    registered_send_callback = callback;
+    return ESP_OK;
+}
+
+esp_err_t esp_now_unregister_send_cb() {
+    registered_send_callback = nullptr;
+    return ESP_OK;
+}
+
+esp_err_t esp_now_add_peer(const esp_now_peer_info_t* peer) {
+    expect(peer != nullptr, "null ESP-NOW peer was added");
+
+    const std::uint8_t expected_address[ESP_NOW_ETH_ALEN] = {
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF
+    };
+
+    expect(
+        std::memcmp(
+            peer->peer_addr,
+            expected_address,
+            sizeof(expected_address)
+        ) == 0,
+        "ESP-NOW peer was not the broadcast address"
+    );
+    expect(peer->channel == 1, "ESP-NOW peer used the wrong channel");
+    expect(peer->ifidx == WIFI_IF_STA, "ESP-NOW peer used the wrong interface");
+    expect(!peer->encrypt, "ESP-NOW broadcast peer enabled encryption");
+
+    broadcast_peer_registered = true;
+    return ESP_OK;
+}
+
+esp_err_t esp_now_del_peer(const std::uint8_t* peer_address) {
+    expect(peer_address != nullptr, "null ESP-NOW peer was deleted");
+    broadcast_peer_registered = false;
+    return ESP_OK;
+}
+
+esp_err_t esp_now_send(
+    const std::uint8_t* peer_address,
+    const std::uint8_t* data,
+    std::size_t data_length
+) {
+    expect(peer_address != nullptr, "ESP-NOW send omitted its destination");
+    expect(data != nullptr, "ESP-NOW send omitted its packet data");
+
+    std::memcpy(
+        last_send_address,
+        peer_address,
+        sizeof(last_send_address)
+    );
+    last_sent_data.assign(data, data + data_length);
+    return next_send_result;
+}
+
 QueueHandle_t xQueueCreate(
     UBaseType_t queue_length,
     UBaseType_t item_size
@@ -189,13 +261,13 @@ int main() {
 
     expect(
         transport.tryTransmit(transmit_packet) ==
-            TransportTransmitStatus::Unavailable,
-        "ESP-NOW transport exposed unimplemented transmission"
+            TransportTransmitStatus::NotInitialized,
+        "uninitialized transport accepted transmission"
     );
     expect(
         transport.pollTransmitCompletion() ==
-            TransportTransmitCompletionStatus::Unavailable,
-        "ESP-NOW transport exposed unimplemented send completion"
+            TransportTransmitCompletionStatus::NotInitialized,
+        "uninitialized transport exposed send completion"
     );
 
     expect(
@@ -214,20 +286,92 @@ int main() {
         "transport initialization failed"
     );
     expect(
-        transport.tryTransmit(transmit_packet) ==
-            TransportTransmitStatus::Unavailable,
-        "initialized ESP-NOW transport exposed unimplemented transmission"
+        broadcast_peer_registered,
+        "ESP-NOW broadcast peer was not registered"
     );
     expect(
         transport.pollTransmitCompletion() ==
-            TransportTransmitCompletionStatus::Unavailable,
-        "initialized ESP-NOW transport exposed unimplemented send completion"
+            TransportTransmitCompletionStatus::Empty,
+        "new transmit completion queue was not empty"
     );
     expect(
         transport.tryReceive(received_packet) ==
             TransportReceiveStatus::Empty,
         "new receive queue was not empty"
     );
+
+    expect(
+        transport.tryTransmit(transmit_packet) ==
+            TransportTransmitStatus::Queued,
+        "valid ESP-NOW packet was not queued for transmission"
+    );
+    expect(
+        last_sent_data.size() == sizeof(transmit_packet) &&
+            std::memcmp(
+                last_sent_data.data(),
+                &transmit_packet,
+                sizeof(transmit_packet)
+            ) == 0,
+        "ESP-NOW send did not receive the complete packet"
+    );
+    const std::uint8_t expected_broadcast_address[ESP_NOW_ETH_ALEN] = {
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF
+    };
+    expect(
+        std::memcmp(
+            last_send_address,
+            expected_broadcast_address,
+            sizeof(expected_broadcast_address)
+        ) == 0,
+        "ESP-NOW packet was not sent to the broadcast address"
+    );
+    expect(
+        transport.tryTransmit(transmit_packet) ==
+            TransportTransmitStatus::Busy,
+        "second transmission was accepted while one was pending"
+    );
+    expect(
+        transport.pollTransmitCompletion() ==
+            TransportTransmitCompletionStatus::Pending,
+        "pending transmission was not reported"
+    );
+
+    completeSend(ESP_NOW_SEND_SUCCESS);
+    expect(
+        transport.pollTransmitCompletion() ==
+            TransportTransmitCompletionStatus::Sent,
+        "successful send callback was not reported"
+    );
+    expect(
+        transport.pollTransmitCompletion() ==
+            TransportTransmitCompletionStatus::Empty,
+        "consumed completion remained queued"
+    );
+
+    expect(
+        transport.tryTransmit(transmit_packet) ==
+            TransportTransmitStatus::Queued,
+        "transmission was not accepted after completion"
+    );
+    completeSend(ESP_NOW_SEND_FAIL);
+    expect(
+        transport.pollTransmitCompletion() ==
+            TransportTransmitCompletionStatus::Failed,
+        "failed send callback was not reported"
+    );
+
+    next_send_result = ESP_FAIL;
+    expect(
+        transport.tryTransmit(transmit_packet) ==
+            TransportTransmitStatus::Failed,
+        "immediate ESP-NOW send failure was not reported"
+    );
+    expect(
+        transport.pollTransmitCompletion() ==
+            TransportTransmitCompletionStatus::Empty,
+        "failed submission left a transmission pending"
+    );
+    next_send_result = ESP_OK;
 
     Packet copied_packet = makePacket(1);
     const Packet original_packet = copied_packet;
@@ -303,6 +447,22 @@ int main() {
         "receive activity count did not match exact-sized frames"
     );
 
-    std::puts("PASS: ESP-NOW frames load into the bounded FreeRTOS queue");
+    transport.shutdown();
+    expect(
+        registered_receive_callback == nullptr &&
+            registered_send_callback == nullptr,
+        "ESP-NOW callbacks remained registered after shutdown"
+    );
+    expect(
+        !broadcast_peer_registered,
+        "ESP-NOW broadcast peer remained registered after shutdown"
+    );
+    expect(
+        transport.pollTransmitCompletion() ==
+            TransportTransmitCompletionStatus::NotInitialized,
+        "shutdown transport still exposed completion state"
+    );
+
+    std::puts("PASS: ESP-NOW receive and transmit queues");
     return EXIT_SUCCESS;
 }

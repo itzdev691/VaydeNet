@@ -3,6 +3,7 @@
 #include "NodeSettingsLoader.h"
 #include "VaydeNet/VaydeEngine.h"
 #include "VaydeNet/startup/EngineStartupContext.h"
+#include "VaydeNet/transmit/EngineTransmit.h"
 
 #ifndef VAYDENET_ACTIVITY_LED_GPIO
 #error "VAYDENET_ACTIVITY_LED_GPIO must be defined"
@@ -95,4 +96,15 @@ NodeBootstrapStatus NodeBootstrap::run() {
 
 EngineProcessResult NodeBootstrap::processNextPacket() {
     return vayde_engine_.processNextPacket();
+}
+
+EngineTransmitStatus NodeBootstrap::tryTransmit(
+    const TransmitRequest& request
+) {
+    return vayde_engine_.tryTransmit(request);
+}
+
+EngineTransmitCompletionStatus
+NodeBootstrap::pollTransmitCompletion() {
+    return vayde_engine_.pollTransmitCompletion();
 }

@@ -26,6 +26,10 @@ class NodeBootstrap {
 public:
     NodeBootstrapStatus run();
     EngineProcessResult processNextPacket();
+    EngineTransmitStatus tryTransmit(
+        const TransmitRequest& request
+    );
+    EngineTransmitCompletionStatus pollTransmitCompletion();
 
 private:
     HardwareIdentity hardware_identity_{};

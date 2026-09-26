@@ -9,6 +9,7 @@ struct wifi_init_config_t {};
 constexpr int WIFI_STORAGE_RAM = 0;
 constexpr int WIFI_MODE_STA = 1;
 constexpr int WIFI_SECOND_CHAN_NONE = 0;
+constexpr int WIFI_IF_STA = 0;
 
 #define WIFI_INIT_CONFIG_DEFAULT() wifi_init_config_t{}
 

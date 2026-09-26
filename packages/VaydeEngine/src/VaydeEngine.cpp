@@ -4,6 +4,8 @@
 #include "VaydeNet/message/Message.h"
 #include "VaydeNet/message/MessageSink.h"
 #include "VaydeNet/message/PacketMessageDecoder.h"
+#include "VaydeNet/message/PacketMessageEncoder.h"
+#include "VaydeNet/transmit/TransmitRequest.h"
 #include "VaydeNet/packet/Packet.h"
 #include "VaydeNet/packet/PacketValidation.h"
 #include "VaydeNet/startup/EngineStartupContext.h"
@@ -15,6 +17,15 @@ namespace {
 constexpr std::uint16_t kSupportedProtocolVersion = 1;
 constexpr std::uint16_t kSupportedSettingsVersion = 1;
 
+std::uint64_t makeSenderId(const HardwareIdentity& identity) {
+    std::uint64_t sender_id = 0;
+
+    for (const std::uint8_t byte : identity.device_uid) {
+        sender_id = (sender_id << 8U) | byte;
+    }
+
+    return sender_id;
+}
 }  // namespace
 
 EngineStartStatus VaydeEngine::start(
@@ -144,4 +155,99 @@ EngineProcessResult VaydeEngine::processNextPacket() {
         EngineProcessStatus::TransportNotReady,
         PacketValidationStatus::NotChecked
     };
+}
+
+EngineTransmitStatus VaydeEngine::tryTransmit(
+    const TransmitRequest& request
+) {
+    if (!started_ || identity_ == nullptr) {
+        return EngineTransmitStatus::NotStarted;
+    }
+
+    if (transport_ == nullptr) {
+        return EngineTransmitStatus::TransportNotReady;
+    }
+
+    if (
+        request.destination !=
+        TransmitDestination::Broadcast
+    ) {
+        return EngineTransmitStatus::Unavailable;
+    }
+
+    Packet packet{};
+
+    switch (
+        encodeOutboundMessage(
+            request.message,
+            makeSenderId(*identity_),
+            next_sequence_number_,
+            packet
+        )
+    ) {
+        case PacketMessageEncodeStatus::Encoded:
+            break;
+
+        case PacketMessageEncodeStatus::InvalidType:
+            return EngineTransmitStatus::InvalidMessageType;
+
+        case PacketMessageEncodeStatus::InvalidTtl:
+            return EngineTransmitStatus::InvalidMessageTtl;
+
+        case PacketMessageEncodeStatus::InvalidLength:
+            return EngineTransmitStatus::InvalidMessageLength;
+    }
+
+    switch (transport_->tryTransmit(packet)) {
+        case TransportTransmitStatus::Queued:
+            ++next_sequence_number_;
+            return EngineTransmitStatus::Queued;
+
+        case TransportTransmitStatus::Busy:
+            return EngineTransmitStatus::Busy;
+
+        case TransportTransmitStatus::NotInitialized:
+            return EngineTransmitStatus::TransportNotReady;
+
+        case TransportTransmitStatus::Unavailable:
+            return EngineTransmitStatus::Unavailable;
+
+        case TransportTransmitStatus::Failed:
+            return EngineTransmitStatus::Failed;
+    }
+
+    return EngineTransmitStatus::Failed;
+}
+
+EngineTransmitCompletionStatus
+VaydeEngine::pollTransmitCompletion() {
+    if (!started_) {
+        return EngineTransmitCompletionStatus::NotStarted;
+    }
+
+    if (transport_ == nullptr) {
+        return EngineTransmitCompletionStatus::TransportNotReady;
+    }
+
+    switch (transport_->pollTransmitCompletion()) {
+        case TransportTransmitCompletionStatus::Sent:
+            return EngineTransmitCompletionStatus::Sent;
+
+        case TransportTransmitCompletionStatus::Failed:
+            return EngineTransmitCompletionStatus::Failed;
+
+        case TransportTransmitCompletionStatus::Pending:
+            return EngineTransmitCompletionStatus::Pending;
+
+        case TransportTransmitCompletionStatus::Empty:
+            return EngineTransmitCompletionStatus::Empty;
+
+        case TransportTransmitCompletionStatus::NotInitialized:
+            return EngineTransmitCompletionStatus::TransportNotReady;
+
+        case TransportTransmitCompletionStatus::Unavailable:
+            return EngineTransmitCompletionStatus::Unavailable;
+    }
+
+    return EngineTransmitCompletionStatus::Failed;
 }
