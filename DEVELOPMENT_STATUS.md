@@ -75,9 +75,9 @@ Failures are returned through `Esp32BoardInfoStatus`. This identifies the physic
 
 ### ESP32 target environments
 
-`apps/node/platformio.ini` defines node targets for the ESP32-S3 DevKitC-1, ESP32-C5 DevKitC-1, and the ESP32-S2 Flipper Wi-Fi Developer Board. The C5 target uses the pioarduino ESP-IDF 5.5.4-compatible platform package and `apps/node/sdkconfig-c5.defaults` to select 4 MB flash and route logs through USB Serial/JTAG. All targets use a monitor rate of 115200 baud.
+`apps/node/platformio.ini` defines node targets for the ESP32-S3 DevKitC-1, WEMOS LOLIN S3 Mini, ESP32-C5 DevKitC-1, DOIT ESP32 DEVKIT V1, and the ESP32-S2 Flipper Wi-Fi Developer Board. The targets use the pioarduino ESP-IDF 5.5.4-compatible platform package. The C5 target uses `apps/node/sdkconfig-c5.defaults` to select 4 MB flash and route logs through USB Serial/JTAG. The DOIT target uses `apps/node/sdkconfig-doit.defaults` to match its 4 MB flash. All targets use a monitor rate of 115200 baud.
 
-The S3 and C5 targets select addressable RGB LEDs on GPIO 48 and GPIO 27. The Flipper S2 target selects the active-low green LED on GPIO 5. Its current `esp32-s2-saola-1` PlatformIO board profile declares 4 MB flash while the shared `sdkconfig.defaults` declares 8 MB, producing a flash-size mismatch warning that must be resolved before treating the S2 profile as final.
+The S3 and C5 targets select addressable RGB LEDs on GPIO 48 and GPIO 27. The DOIT target selects its active-high blue LED on GPIO 2. The Flipper S2 target selects the active-low green LED on GPIO 5. Its current `esp32-s2-saola-1` PlatformIO board profile declares 4 MB flash while the shared `sdkconfig.defaults` declares 8 MB, producing a flash-size mismatch warning that must be resolved before treating the S2 profile as final.
 
 ### ESP32 packet activity LED
 
@@ -260,15 +260,14 @@ The current checkpoint does not include:
 - loading the full `NodeSettings` schema;
 - tests for empty, missing, corrupt, valid, and unsupported stored settings;
 - application orchestration for locally originated transmissions beyond the one-shot startup broadcast;
-- sender-side runtime capture of adapter submission and send-callback completion;
+- paired sender/receiver serial traces identifying the flashed builds for both directions;
 - hardware validation of controlled packet rejection and sustained queue draining under load;
 - a common serialized VaydeNet message contract;
 - finalized protocol identity, message types, capability discovery, or authentication;
 - transport-native nRF24L01, LoRa, Bluetooth, Wi-Fi, or Ethernet adapters;
 - persistent inbox storage or application-level handling after logical-message delivery;
 - a finalized ESP32-S2 flash-size configuration and hardware proof of its active-low activity LED behavior;
-- direct hardware capture of the blank-NVS automatic provisioning branch;
-- bidirectional delivery proof.
+- direct hardware capture of the blank-NVS automatic provisioning branch.
 
 ## Validation
 
@@ -365,8 +364,8 @@ sequence. Because `"VaydeNet node online"` exists only in the node startup
 trigger, the paired lines also provide hardware proof of the bounded
 application-to-engine-to-ESP-NOW broadcast path and peer delivery. The capture
 does not identify the exact flashed commit, show the sender-side queued/sent
-logs, prove bidirectional delivery, exercise controlled rejection cases, or
-demonstrate sustained queue behavior.
+logs for that exchange, prove the reverse direction by itself, exercise
+controlled rejection cases, or demonstrate sustained queue behavior.
 
 The same checkpoint passed all seven sanitizer-backed host tests, covering
 packet layout, validation, outbound encoding, receive processing, logical
@@ -377,6 +376,38 @@ ESP-IDF 5.5.4, using 33,424 bytes of RAM and 706,582 bytes of flash. The build
 still reports the documented 4 MB board-profile versus 8 MB SDK configuration
 warning. This build proves S2 compilation and linking; the runtime proof above
 comes from the user-supplied peer-device capture.
+
+On September 26, 2026, the new `espnow_esp32_doit` environment built and linked
+successfully under ESP-IDF 5.5.4 for PlatformIO board
+`esp32doit-devkit-v1`. Its generated configuration selected 4 MB flash, and the
+image used 35,168 bytes of RAM and 745,101 bytes of flash. The build compiled
+the new active-high GPIO activity-LED backend for the board's GPIO 2 LED.
+Regression builds also passed for the addressable-LED `espnow_esp32s3_mini`
+environment and the active-low GPIO `esp32-s2` environment. `git diff --check`
+passed. At this build-only checkpoint, no DOIT board had been flashed, so boot,
+LED polarity on the physical board, ESP-NOW runtime, and peer delivery were
+unverified.
+
+Later on September 26, 2026, the connected DOIT target was identified through
+its CP2102 serial port as an ESP32-D0WD-V3 with 4 MB flash. The
+`espnow_esp32_doit` bootloader, partition table, and firmware were uploaded to
+the verified port, and esptool verified each written image by hash. A second
+upload using PlatformIO's automatic port selection also succeeded and selected
+that same port. At 115200 baud, serial output reached `Calling app_main()`,
+`Bootstrap ready`, `Startup message queued`, `VaydeEngine node loop started`,
+and `Startup message sent`. This proves local application startup, ESP-NOW
+initialization, and local send completion reporting on this board. The initial
+upload failure could not be reproduced, and its specific cause is unknown.
+Physical GPIO 2 LED behavior remained unverified at this upload checkpoint.
+
+Later on September 26, 2026, the user confirmed a successful back-and-forth
+hardware test of the node TX and RX paths between devices. This is
+user-reported bidirectional ESP-NOW exchange validation. The receiver capture
+above documents logical-message delivery in one direction, and the DOIT serial
+output documents local startup and send completion reporting. Paired serial
+traces for both directions and the exact flashed firmware revisions were not
+provided with the bidirectional report; controlled rejection and sustained-load
+behavior remain unverified.
 
 ## Repository State
 
@@ -389,7 +420,8 @@ ESP-NOW broadcast implementation with callback-delivered completion. Engine
 submission and completion mapping are connected through `NodeBootstrap`.
 The node application submits one startup broadcast and polls its completion.
 The receiver capture above supplies runtime radio and peer-delivery proof for
-that bounded path. Broader application submission, destination handling,
+that bounded path, and the later user-reported hardware test confirms TX and RX
+in both directions. Broader application submission, destination handling,
 retries, acknowledgements, routing, and relay remain outside the implemented
 checkpoint.
 
@@ -401,7 +433,7 @@ The branch contains the cumulative node-bootstrap implementation relative to `ma
 
 ## Merge Readiness
 
-The receive boundary ends after VaydeEngine dequeues one packet, validates version, type, TTL, length, and CRC, decodes supported prototype type `1` into a `Message`, and dispatches it through `MessageSink`. The engine transmit boundary accepts a broadcast `TransmitRequest`, encodes it with node identity and an engine-owned sequence, submits it through the adapter, and maps asynchronous completion through bootstrap forwarding. The node application invokes that boundary once after startup. The paired receiver logs prove adapter transmission and peer delivery for this bounded startup broadcast. This does not claim sender-side completion capture, bidirectional delivery, broader application orchestration, message retention, authentication, routing, relay behavior, production provisioning, or finalized cross-transport serialization.
+The receive boundary ends after VaydeEngine dequeues one packet, validates version, type, TTL, length, and CRC, decodes supported prototype type `1` into a `Message`, and dispatches it through `MessageSink`. The engine transmit boundary accepts a broadcast `TransmitRequest`, encodes it with node identity and an engine-owned sequence, submits it through the adapter, and maps asynchronous completion through bootstrap forwarding. The node application invokes that boundary once after startup. The paired receiver logs prove adapter transmission and peer delivery for this bounded startup broadcast; the later user-reported hardware test confirms bidirectional TX/RX. This does not claim archived paired sender/receiver traces for both directions, broader application orchestration, message retention, authentication, routing, relay behavior, production provisioning, or finalized cross-transport serialization.
 
 ## Implemented Checkpoint: Decode and Dispatch Validated Packets
 
@@ -437,7 +469,7 @@ The sanitizer-backed host suite covers valid packets, every packet-validation re
 
 On September 11, 2026, all four sanitizer-backed host tests passed, `git diff --check` passed, and a clean `espnow_esp32s3_mini` firmware build compiled and linked the production validator and accepted-packet return path into `libVaydeEngine.a`. The image used 36,712 bytes of RAM and 740,717 bytes of flash. This completes the software checkpoint and proves deterministic validation behavior plus firmware integration; it does not prove physical queue draining, radio behavior, packet retention, or logical-message delivery.
 
-Historical user-confirmed node output proves the compatible sender exercised the physical ESP-NOW link, receive queue, and validator before the logical-message boundary was added. The September 26 receiver capture now proves the current decoder-to-`NodeMessageSink` path and bounded startup-broadcast peer delivery on hardware. Remaining hardware work includes controlled failures for each rejection reason, sustained traffic showing that the four-slot queue continues to drain without unacceptable loss, sender-side completion capture, and bidirectional delivery. Packet retention remains later work.
+Historical user-confirmed node output proves the compatible sender exercised the physical ESP-NOW link, receive queue, and validator before the logical-message boundary was added. The September 26 receiver capture now proves the current decoder-to-`NodeMessageSink` path and bounded startup-broadcast peer delivery on hardware. The later user-reported test validates TX and RX in both directions. Remaining hardware work includes controlled failures for each rejection reason, sustained traffic showing that the four-slot queue continues to drain without unacceptable loss, and archived paired traces identifying both flashed builds. Packet retention remains later work.
 
 ## Later Development Sequence
 
@@ -447,4 +479,4 @@ Historical user-confirmed node output proves the compatible sender exercised the
 4. Exercise missing-key, invalid-transport, invalid-channel, valid-settings, NVS-read-failure, and NVS-write-failure paths.
 5. Replace automatic development defaults with an operator-controlled production provisioning contract before deployment.
 6. Add a bounded persistent inbox or application handler behind `MessageSink`; the current implementation logs delivered messages only.
-7. Capture sender-side startup-message submission and completion logs, then add a reverse-direction exchange to establish bidirectional delivery.
+7. Archive paired sender/receiver serial traces and flashed firmware revisions for both directions of the user-confirmed bidirectional hardware exchange.
