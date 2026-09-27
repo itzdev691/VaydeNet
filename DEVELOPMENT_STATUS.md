@@ -6,7 +6,7 @@ Target bootstrap-branch completion: September 18, 2026
 
 VaydeNet is being developed as a hardware-independent communication framework for embedded systems. The intended application boundary remains independent of ESP-NOW, nRF24L01, LoRa, Bluetooth, Wi-Fi, Ethernet, and future transports.
 
-The active implementation checkpoint is the ESP32 node bootstrap. It can retrieve hardware identity, read a minimal configuration from NVS, select ESP-NOW, initialize a board-specific packet activity LED, apply the configured Wi-Fi channel, initialize ESP-NOW, register a receive callback, log incoming frame metadata, request an LED flash for each exact-sized `Packet` frame, copy that frame into a bounded four-slot FreeRTOS queue, construct an `EngineStartupContext`, hand the initialized dependencies to `VaydeEngine::start()`, and report a specific startup result. After successful startup, the node submits one type-1 broadcast startup message and remains in a FreeRTOS-backed application loop that asks VaydeEngine to process one queued frame and poll any pending transmit completion every 10 ms. VaydeEngine validates received frames, decodes supported prototype type `1` into a transport-independent `Message`, and dispatches it through a portable `MessageSink`. The current node sink logs logical-message metadata but does not retain, route, relay, or acknowledge the message.
+The active implementation checkpoint is the ESP32 node bootstrap. It can retrieve hardware identity, read a minimal configuration from NVS, select ESP-NOW, initialize a board-specific packet activity LED, apply the configured Wi-Fi channel, initialize ESP-NOW, register a receive callback, log incoming frame metadata, request an LED flash for each exact-sized `Packet` frame, copy that frame into a bounded four-slot FreeRTOS queue, construct an `EngineStartupContext`, hand the initialized dependencies to `VaydeEngine::start()`, and report a specific startup result. After successful startup, the FreeRTOS-backed application loop asks VaydeEngine to process one queued frame and poll any pending transmit completion every 10 ms. It also submits an immediate type-1 broadcast heartbeat with payload `Node is alive` and repeats the attempt every five seconds while no earlier transmission is pending. VaydeEngine validates received frames, decodes supported prototype type `1` into a transport-independent `Message`, and dispatches it through a portable `MessageSink`. The current node sink logs logical-message metadata but does not retain, route, relay, or acknowledge the message.
 
 ## Current Startup Path
 
@@ -34,7 +34,6 @@ ESP-IDF app_main()
         -> validate board model, protocol version, settings version, and transport selection
         -> retain pointers to identity, settings, transport, and message sink
     -> return and log NodeBootstrapStatus
-    -> submit one broadcast startup message: "VaydeNet node online"
     -> enter the app_main packet-processing loop
         -> VaydeEngine::processNextPacket()
         -> TransportInterface::tryReceive(Packet&)
@@ -43,6 +42,7 @@ ESP-IDF app_main()
         -> MessageSink::deliver(const Message&)
         -> report processing, validation, decoding, or sink outcome
         -> poll pending transmit completion
+        -> broadcast "Node is alive" immediately, then every five seconds when no send is pending
         -> delay 10 ms before the next receive attempt
 ```
 
@@ -259,7 +259,7 @@ The current checkpoint does not include:
 - an operator-controlled production provisioning, update, reset, or migration workflow;
 - loading the full `NodeSettings` schema;
 - tests for empty, missing, corrupt, valid, and unsupported stored settings;
-- application orchestration for locally originated transmissions beyond the one-shot startup broadcast;
+- application orchestration for locally originated transmissions beyond the periodic heartbeat;
 - paired sender/receiver serial traces identifying the flashed builds for both directions;
 - hardware validation of controlled packet rejection and sustained queue draining under load;
 - a common serialized VaydeNet message contract;
@@ -360,8 +360,8 @@ passed packet validation, decoded as prototype message type `1`, and reached
 `NodeMessageSink` with the expected 20-byte startup payload. The decimal source
 ID `114792214391378` equals the sender MAC `68:67:25:29:6a:52` packed into the
 low 48 bits, and sequence `0` matches the engine's initial locally originated
-sequence. Because `"VaydeNet node online"` exists only in the node startup
-trigger, the paired lines also provide hardware proof of the bounded
+sequence. At that checkpoint, `"VaydeNet node online"` existed only in the node
+startup trigger, so the paired lines also provide hardware proof of the bounded
 application-to-engine-to-ESP-NOW broadcast path and peer delivery. The capture
 does not identify the exact flashed commit, show the sender-side queued/sent
 logs for that exchange, prove the reverse direction by itself, exercise
@@ -376,6 +376,19 @@ ESP-IDF 5.5.4, using 33,424 bytes of RAM and 706,582 bytes of flash. The build
 still reports the documented 4 MB board-profile versus 8 MB SDK configuration
 warning. This build proves S2 compilation and linking; the runtime proof above
 comes from the user-supplied peer-device capture.
+
+On September 26, 2026, the node application changed the one-shot startup
+submission into a five-second `Node is alive` heartbeat scheduled from its
+existing 10 ms loop. The loop polls a pending send before attempting another,
+and schedules the next attempt from the last attempt time, including after a
+failed submission or completion. The tick-difference check handles timer
+wraparound. The seven host tests passed; they cover the existing engine and
+transport behavior but do not exercise the application timer. After cleaning
+the known duplicate ESP-IDF target artifact, a DOIT ESP32 firmware build
+compiled and linked the updated loop under ESP-IDF 5.5.4 (35,168 bytes DRAM,
+745,081 bytes flash). This is source, host-test, and firmware-build evidence.
+The updated firmware has not been flashed, and repeated radio transmission or
+peer delivery has not been observed for this change.
 
 On September 26, 2026, the new `espnow_esp32_doit` environment built and linked
 successfully under ESP-IDF 5.5.4 for PlatformIO board
@@ -418,10 +431,11 @@ The active branch on September 26, 2026 is
 encoding primitive, the portable nonblocking transmit contract, and a bounded
 ESP-NOW broadcast implementation with callback-delivered completion. Engine
 submission and completion mapping are connected through `NodeBootstrap`.
-The node application submits one startup broadcast and polls its completion.
+The node application submits a periodic broadcast heartbeat and polls its completion.
 The receiver capture above supplies runtime radio and peer-delivery proof for
-that bounded path, and the later user-reported hardware test confirms TX and RX
-in both directions. Broader application submission, destination handling,
+the earlier one-shot startup broadcast, and the later user-reported hardware
+test confirms TX and RX in both directions for that earlier firmware. Broader
+application submission, destination handling,
 retries, acknowledgements, routing, and relay remain outside the implemented
 checkpoint.
 
@@ -433,7 +447,7 @@ The branch contains the cumulative node-bootstrap implementation relative to `ma
 
 ## Merge Readiness
 
-The receive boundary ends after VaydeEngine dequeues one packet, validates version, type, TTL, length, and CRC, decodes supported prototype type `1` into a `Message`, and dispatches it through `MessageSink`. The engine transmit boundary accepts a broadcast `TransmitRequest`, encodes it with node identity and an engine-owned sequence, submits it through the adapter, and maps asynchronous completion through bootstrap forwarding. The node application invokes that boundary once after startup. The paired receiver logs prove adapter transmission and peer delivery for this bounded startup broadcast; the later user-reported hardware test confirms bidirectional TX/RX. This does not claim archived paired sender/receiver traces for both directions, broader application orchestration, message retention, authentication, routing, relay behavior, production provisioning, or finalized cross-transport serialization.
+The receive boundary ends after VaydeEngine dequeues one packet, validates version, type, TTL, length, and CRC, decodes supported prototype type `1` into a `Message`, and dispatches it through `MessageSink`. The engine transmit boundary accepts a broadcast `TransmitRequest`, encodes it with node identity and an engine-owned sequence, submits it through the adapter, and maps asynchronous completion through bootstrap forwarding. The node application now invokes that boundary periodically for a heartbeat. The historical paired receiver logs prove adapter transmission and peer delivery for the earlier one-shot startup broadcast; the later user-reported hardware test confirms bidirectional TX/RX for that earlier firmware. Repeated heartbeat transmission and peer delivery have not yet been observed on hardware. This does not claim archived paired sender/receiver traces for both directions, broader application orchestration, message retention, authentication, routing, relay behavior, production provisioning, or finalized cross-transport serialization.
 
 ## Implemented Checkpoint: Decode and Dispatch Validated Packets
 

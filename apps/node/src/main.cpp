@@ -12,24 +12,25 @@ namespace {
 
 constexpr char kLogTag[] = "NodeBootstrap";
 constexpr std::uint32_t kNodePollIntervalMs = 10;
-constexpr char kStartupPayload[] = "VaydeNet node online";
+constexpr std::uint32_t kHeartbeatIntervalMs = 5000;
+constexpr char kHeartbeatPayload[] = "Node is alive";
 
 static_assert(
-    sizeof(kStartupPayload) - 1 <= kMaximumOutboundPayloadSize,
-    "Startup message exceeds outbound payload capacity"
+    sizeof(kHeartbeatPayload) - 1 <= kMaximumOutboundPayloadSize,
+    "Heartbeat message exceeds outbound payload capacity"
 );
 
-TransmitRequest makeStartupTransmitRequest() {
+TransmitRequest makeHeartbeatTransmitRequest() {
     TransmitRequest request{};
     request.destination = TransmitDestination::Broadcast;
     request.message.type = 1;
     request.message.flags = 0;
     request.message.ttl = 1;
     request.message.payload_length =
-        static_cast<std::uint16_t>(sizeof(kStartupPayload) - 1);
+        static_cast<std::uint16_t>(sizeof(kHeartbeatPayload) - 1);
 
     std::copy_n(
-        kStartupPayload,
+        kHeartbeatPayload,
         request.message.payload_length,
         request.message.payload.begin()
     );
@@ -37,12 +38,12 @@ TransmitRequest makeStartupTransmitRequest() {
     return request;
 }
 
-bool submitStartupMessage(NodeBootstrap& bootstrap) {
-    const TransmitRequest request = makeStartupTransmitRequest();
+bool submitHeartbeat(NodeBootstrap& bootstrap) {
+    const TransmitRequest request = makeHeartbeatTransmitRequest();
 
     switch (bootstrap.tryTransmit(request)) {
         case EngineTransmitStatus::Queued:
-            ESP_LOGI(kLogTag, "Startup message queued");
+            ESP_LOGI(kLogTag, "Heartbeat queued");
             return true;
 
         case EngineTransmitStatus::Busy:
@@ -50,15 +51,15 @@ bool submitStartupMessage(NodeBootstrap& bootstrap) {
             break;
 
         case EngineTransmitStatus::InvalidMessageType:
-            ESP_LOGE(kLogTag, "Invalid startup message type");
+            ESP_LOGE(kLogTag, "Invalid heartbeat message type");
             break;
 
         case EngineTransmitStatus::InvalidMessageTtl:
-            ESP_LOGE(kLogTag, "Invalid startup message TTL");
+            ESP_LOGE(kLogTag, "Invalid heartbeat message TTL");
             break;
 
         case EngineTransmitStatus::InvalidMessageLength:
-            ESP_LOGE(kLogTag, "Invalid startup message length");
+            ESP_LOGE(kLogTag, "Invalid heartbeat message length");
             break;
 
         case EngineTransmitStatus::NotStarted:
@@ -74,7 +75,7 @@ bool submitStartupMessage(NodeBootstrap& bootstrap) {
             break;
 
         case EngineTransmitStatus::Failed:
-            ESP_LOGE(kLogTag, "Startup message submission failed");
+            ESP_LOGE(kLogTag, "Heartbeat submission failed");
             break;
     }
 
@@ -108,8 +109,13 @@ const char* packetValidationStatusName(PacketValidationStatus status) {
     return "unknown validation result";
 }
 
-void runNodeLoop(NodeBootstrap& bootstrap, bool transmit_pending) {
+void runNodeLoop(NodeBootstrap& bootstrap) {
     ESP_LOGI(kLogTag, "VaydeEngine node loop started");
+    const TickType_t heartbeat_interval_ticks =
+        pdMS_TO_TICKS(kHeartbeatIntervalMs);
+    TickType_t last_heartbeat_tick =
+        xTaskGetTickCount() - heartbeat_interval_ticks;
+    bool transmit_pending = false;
 
     while (true) {
         const EngineProcessResult process_result =
@@ -161,12 +167,12 @@ void runNodeLoop(NodeBootstrap& bootstrap, bool transmit_pending) {
         if (transmit_pending) {
             switch (bootstrap.pollTransmitCompletion()) {
                 case EngineTransmitCompletionStatus::Sent:
-                    ESP_LOGI(kLogTag, "Startup message sent");
+                    ESP_LOGI(kLogTag, "Heartbeat sent");
                     transmit_pending = false;
                     break;
 
                 case EngineTransmitCompletionStatus::Failed:
-                    ESP_LOGE(kLogTag, "Startup message send failed");
+                    ESP_LOGE(kLogTag, "Heartbeat send failed");
                     transmit_pending = false;
                     break;
 
@@ -174,7 +180,7 @@ void runNodeLoop(NodeBootstrap& bootstrap, bool transmit_pending) {
                     break;
 
                 case EngineTransmitCompletionStatus::Empty:
-                    ESP_LOGW(kLogTag, "Startup message completion is empty");
+                    ESP_LOGW(kLogTag, "Heartbeat completion is empty");
                     transmit_pending = false;
                     break;
 
@@ -193,6 +199,14 @@ void runNodeLoop(NodeBootstrap& bootstrap, bool transmit_pending) {
                     transmit_pending = false;
                     break;
             }
+        }
+
+        const TickType_t now = xTaskGetTickCount();
+        if (!transmit_pending &&
+            static_cast<TickType_t>(now - last_heartbeat_tick) >=
+                heartbeat_interval_ticks) {
+            last_heartbeat_tick = now;
+            transmit_pending = submitHeartbeat(bootstrap);
         }
 
         vTaskDelay(pdMS_TO_TICKS(kNodePollIntervalMs));
@@ -254,6 +268,5 @@ extern "C" void app_main() {
             return;
     }
 
-    const bool transmit_pending = submitStartupMessage(bootstrap);
-    runNodeLoop(bootstrap, transmit_pending);
+    runNodeLoop(bootstrap);
 }
