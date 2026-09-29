@@ -1,12 +1,12 @@
 # VaydeNet Development Status
 
-Snapshot: September 18, 2026
+Snapshot: September 26, 2026
 
 Target bootstrap-branch completion: September 18, 2026
 
 VaydeNet is being developed as a hardware-independent communication framework for embedded systems. The intended application boundary remains independent of ESP-NOW, nRF24L01, LoRa, Bluetooth, Wi-Fi, Ethernet, and future transports.
 
-The active implementation checkpoint is the ESP32 node bootstrap. It can retrieve hardware identity, read a minimal configuration from NVS, select ESP-NOW, initialize a board-specific packet activity LED, apply the configured Wi-Fi channel, initialize ESP-NOW, register a receive callback, log incoming frame metadata, request an LED flash for each exact-sized `Packet` frame, copy that frame into a bounded four-slot FreeRTOS queue, construct an `EngineStartupContext`, hand the initialized dependencies to `VaydeEngine::start()`, and report a specific startup result. After successful startup, the node remains in a FreeRTOS-backed application loop that asks VaydeEngine to process one queued frame every 10 ms. VaydeEngine validates the frame, decodes supported prototype type `1` into a transport-independent `Message`, and dispatches it through a portable `MessageSink`. The current node sink logs logical-message metadata but does not retain, route, relay, acknowledge, or transmit the message.
+The active implementation checkpoint is the ESP32 node bootstrap. It can retrieve hardware identity, read a minimal configuration from NVS, select ESP-NOW, initialize a board-specific packet activity LED, apply the configured Wi-Fi channel, initialize ESP-NOW, register a receive callback, log incoming frame metadata, request an LED flash for each exact-sized `Packet` frame, copy that frame into a bounded four-slot FreeRTOS queue, construct an `EngineStartupContext`, hand the initialized dependencies to `VaydeEngine::start()`, and report a specific startup result. After successful startup, the FreeRTOS-backed application loop asks VaydeEngine to process one queued frame and poll any pending transmit completion every 10 ms. It also submits an immediate type-1 broadcast heartbeat with payload `Node is alive` and repeats the attempt every five seconds while no earlier transmission is pending. VaydeEngine validates received frames, decodes supported prototype type `1` into a transport-independent `Message`, and dispatches it through a portable `MessageSink`. The current node sink logs logical-message metadata but does not retain, route, relay, or acknowledge the message.
 
 ## Current Startup Path
 
@@ -41,6 +41,8 @@ ESP-IDF app_main()
         -> decode supported packet type into Message
         -> MessageSink::deliver(const Message&)
         -> report processing, validation, decoding, or sink outcome
+        -> poll pending transmit completion
+        -> broadcast "Node is alive" immediately, then every five seconds when no send is pending
         -> delay 10 ms before the next receive attempt
 ```
 
@@ -73,9 +75,9 @@ Failures are returned through `Esp32BoardInfoStatus`. This identifies the physic
 
 ### ESP32 target environments
 
-`apps/node/platformio.ini` defines node targets for the ESP32-S3 DevKitC-1, ESP32-C5 DevKitC-1, and the ESP32-S2 Flipper Wi-Fi Developer Board. The C5 target uses the pioarduino ESP-IDF 5.5.4-compatible platform package and `apps/node/sdkconfig-c5.defaults` to select 4 MB flash and route logs through USB Serial/JTAG. All targets use a monitor rate of 115200 baud.
+`apps/node/platformio.ini` defines node targets for the ESP32-S3 DevKitC-1, WEMOS LOLIN S3 Mini, ESP32-C5 DevKitC-1, DOIT ESP32 DEVKIT V1, and the ESP32-S2 Flipper Wi-Fi Developer Board. The targets use the pioarduino ESP-IDF 5.5.4-compatible platform package. The C5 target uses `apps/node/sdkconfig-c5.defaults` to select 4 MB flash and route logs through USB Serial/JTAG. The DOIT target uses `apps/node/sdkconfig-doit.defaults` to match its 4 MB flash. All targets use a monitor rate of 115200 baud.
 
-The S3 and C5 targets select addressable RGB LEDs on GPIO 48 and GPIO 27. The Flipper S2 target selects the active-low green LED on GPIO 5. Its current `esp32-s2-saola-1` PlatformIO board profile declares 4 MB flash while the shared `sdkconfig.defaults` declares 8 MB, producing a flash-size mismatch warning that must be resolved before treating the S2 profile as final.
+The S3 and C5 targets select addressable RGB LEDs on GPIO 48 and GPIO 27. The DOIT target selects its active-high blue LED on GPIO 2. The Flipper S2 target selects the active-low green LED on GPIO 5. Its current `esp32-s2-saola-1` PlatformIO board profile declares 4 MB flash while the shared `sdkconfig.defaults` declares 8 MB, producing a flash-size mismatch warning that must be resolved before treating the S2 profile as final.
 
 ### ESP32 packet activity LED
 
@@ -118,16 +120,27 @@ Only `transport` and `channel` are stored and loaded. Node ID, network ID, versi
 
 ### Transport boundary
 
-`packages/VaydeEngine/include/VaydeNet/transport/TransportInterface.h` defines portable initialization and nonblocking receive contracts:
+`packages/VaydeEngine/include/VaydeNet/transport/TransportInterface.h` defines portable initialization, nonblocking receive, and nonblocking transmit contracts:
 
 ```text
 TransportInterface::initialize() -> TransportStatus
 TransportInterface::tryReceive(Packet&) -> TransportReceiveStatus
+TransportInterface::tryTransmit(const Packet&) -> TransportTransmitStatus
+TransportInterface::pollTransmitCompletion() -> TransportTransmitCompletionStatus
 ```
 
 `TransportReceiveStatus` distinguishes `Received`, `Empty`, and `NotInitialized`. The contract includes the current `Packet` prototype directly so every adapter implementation uses the same complete type.
 
 `EspNowTransport` overrides this method and translates its FreeRTOS queue result into the portable status. Queue ownership, callback registration, and ESP-NOW-specific buffering remain private to the adapter. `VaydeEngine::processNextPacket()` calls this contract and maps transport, validation, decoding, and sink outcomes into `EngineProcessResult` without importing FreeRTOS or ESP-NOW headers into the engine. Raw `Packet` values remain internal to the engine and never cross the bootstrap boundary.
+
+The transmit contract separates immediate submission from asynchronous
+completion. Submission can report `Queued`, `Busy`, `NotInitialized`,
+`Unavailable`, or `Failed`; completion polling can report `Sent`, `Failed`,
+`Pending`, `Empty`, `NotInitialized`, or `Unavailable`. `EspNowTransport`
+implements a bounded broadcast send path with one outstanding packet. It maps
+accepted `esp_now_send()` submissions to `Queued`, rejects concurrent
+submissions as `Busy`, and exposes callback-delivered `Sent` or `Failed`
+results through nonblocking completion polling.
 
 ### VaydeEngine startup handoff
 
@@ -136,6 +149,28 @@ TransportInterface::tryReceive(Packet&) -> TransportReceiveStatus
 The engine rejects repeated startup, a missing board model, unsupported protocol or settings versions, and an unspecified transport. After validation, it retains pointers to the bootstrap-owned dependencies and reports `EngineStartStatus::Ok`. Bootstrap maps any rejected start to `NodeBootstrapStatus::EngineStartupFailed`.
 
 `VaydeEngine::start()` remains dependency validation and binding only. After startup, the node application's existing FreeRTOS `app_main` task repeatedly calls `VaydeEngine::processNextPacket()`. The engine performs one nonblocking transport receive attempt per call. A received frame is removed from the queue, validated, decoded into a `Message`, and delivered through `MessageSink`. `EngineProcessResult` preserves the validation outcome without exposing raw packet data. The node's concrete sink logs logical-message metadata but does not retain or relay traffic.
+
+### Outbound message encoding primitive
+
+`packages/VaydeEngine/include/VaydeNet/message/OutboundMessage.h` defines the
+transport-independent content for a locally originated message. Destination and
+transport options are excluded so routing and adapter concerns do not become
+part of the logical message.
+
+`encodeOutboundMessage()` currently supports prototype type `1`, requires a
+nonzero TTL, bounds the payload to 200 bytes, clears the output packet before
+every result, supplies packet version `1`, copies the caller-provided sender and
+sequence values, and calculates CRC-16/CCITT-FALSE last. The resulting packet
+passes the existing validator. `VaydeEngine::tryTransmit()` now uses this
+primitive to assign the node-derived sender ID and engine-owned sequence number
+before submitting the packet through the portable transport contract. Engine
+completion polling maps the portable completion states without exposing the
+concrete adapter. Application-level invocation remains incomplete.
+
+The prototype sender ID packs the six `HardwareIdentity::device_uid` bytes in
+array order into the low 48 bits of the packet's 64-bit sender field, leaving
+the high 16 bits zero. The engine starts its local sequence at `0` and advances
+it only when the transport accepts a submission as `Queued`.
 
 ### ESP-NOW adapter initialization
 
@@ -151,13 +186,24 @@ The engine rejects repeated startup, a missing board model, unsupported protocol
 8. primary-channel application through `esp_wifi_set_channel()`;
 9. ESP-NOW initialization;
 10. creation of a four-slot FreeRTOS queue sized for the current 220-byte `Packet`;
-11. ESP-NOW receive-callback registration.
+11. creation of a one-slot transmit-completion queue;
+12. ESP-NOW receive- and send-callback registration;
+13. unencrypted broadcast-peer registration on the configured station channel.
 
 The accepted configured channel range is `1` through `14`. Initialization is rejected when no channel has been configured. Reinitialization returns success after a successful first initialization.
 
 The receive callback rejects null metadata, null source addresses, null payload pointers, and non-positive lengths. For accepted callbacks, it logs the sender MAC address and received byte count. It then accepts only frames whose length equals `sizeof(Packet)`, copies them into a local `Packet`, requests the configured activity indication, and uses nonblocking `xQueueSend(..., 0)` to copy them into the receive queue. A full queue causes the new packet to be dropped and logged rather than blocking the Wi-Fi callback; the activity indication has already been requested because it currently represents receipt rather than queue acceptance or processing.
 
-`tryReceive(Packet&)` uses nonblocking `xQueueReceive(..., 0)` and distinguishes `Received`, `Empty`, and `NotInitialized`. VaydeEngine calls it through the portable interface from the node's packet-processing loop. Polling starts only after successful bootstrap and occurs every 10 ms, allowing queued frames to be drained outside the Wi-Fi callback. The adapter does not register peers, transmit data, register a send-completion callback, or perform fragmentation and reassembly.
+`tryReceive(Packet&)` uses nonblocking `xQueueReceive(..., 0)` and distinguishes `Received`, `Empty`, and `NotInitialized`. VaydeEngine calls it through the portable interface from the node's packet-processing loop. Polling starts only after successful bootstrap and occurs every 10 ms, allowing queued frames to be drained outside the Wi-Fi callback.
+
+`tryTransmit(const Packet&)` sends the complete 220-byte packet to the ESP-NOW
+broadcast address. It permits one outstanding transmission and reports
+`NotInitialized`, `Busy`, `Failed`, or `Queued`. The send callback performs only
+a nonblocking completion-queue write; `pollTransmitCompletion()` reports
+`Pending`, `Sent`, `Failed`, or `Empty`. Shutdown removes the broadcast peer,
+unregisters both callbacks, deletes both queues, and clears pending state. The
+adapter still does not perform fragmentation, retries, acknowledgement,
+unicast discovery, routing, or relay.
 
 ## Existing Packet and Experiments
 
@@ -181,7 +227,7 @@ This is the current prototype packet used by ESP-NOW examples. It is not the fin
 
 ### WT32-ETH01
 
-`apps/examples/wt32-eth01/ethernet-smoke/` is a tracked standalone experiment. It monitors LAN8720 Ethernet state, probes configured TCP ports, serves a local dashboard, and broadcasts telemetry as the legacy 220-byte `Packet` over ESP-NOW.
+`apps/wt32-eth01/ethernet-smoke/` is a tracked standalone experiment. It monitors LAN8720 Ethernet state, probes configured TCP ports, serves a local dashboard, and broadcasts telemetry as the legacy 220-byte `Packet` over ESP-NOW.
 
 It does not provide a reusable Ethernet transport adapter or connect Ethernet to the node bootstrap.
 
@@ -213,16 +259,15 @@ The current checkpoint does not include:
 - an operator-controlled production provisioning, update, reset, or migration workflow;
 - loading the full `NodeSettings` schema;
 - tests for empty, missing, corrupt, valid, and unsupported stored settings;
-- ESP-NOW peer management;
-- ESP-NOW transmission and send-completion handling;
-- hardware validation of controlled packet rejection, sustained queue draining under load, and logical-message sink delivery;
+- application orchestration for locally originated transmissions beyond the periodic heartbeat;
+- paired sender/receiver serial traces identifying the flashed builds for both directions;
+- hardware validation of controlled packet rejection and sustained queue draining under load;
 - a common serialized VaydeNet message contract;
 - finalized protocol identity, message types, capability discovery, or authentication;
 - transport-native nRF24L01, LoRa, Bluetooth, Wi-Fi, or Ethernet adapters;
 - persistent inbox storage or application-level handling after logical-message delivery;
 - a finalized ESP32-S2 flash-size configuration and hardware proof of its active-low activity LED behavior;
-- direct hardware capture of the blank-NVS automatic provisioning branch;
-- bidirectional delivery proof and validated VaydeNet message processing.
+- direct hardware capture of the blank-NVS automatic provisioning branch.
 
 ## Validation
 
@@ -263,9 +308,136 @@ After flashing compatible sender and node firmware, the user confirmed that node
 
 On September 18, 2026, the sanitizer-backed host suite passed packet layout, packet validation, VaydeEngine processing, logical-message decoding and dispatch, sink rejection, unsupported-type rejection, decoder length rejection, and ESP-NOW receive-queue tests. `git diff --check` passed. A clean `espnow_esp32s3_mini` build compiled `NodeMessageSink.cpp` and `PacketMessageDecoder.cpp`, archived them into the firmware components, and linked successfully. The image used 36,728 bytes of RAM and 741,925 bytes of flash. This proves deterministic host behavior and firmware integration only; the new decoder-to-sink path has not been flashed or observed on hardware.
 
+On September 20, 2026, the sanitizer-backed host suite added outbound-message
+encoding coverage. It verified valid type-1 encoding, identity and sequence
+assignment, payload copying, zeroed unused bytes, CRC validity, maximum-length
+payload handling, rejection of invalid type, TTL, and length values, and output
+clearing for every rejected message. This does not prove transport transmission
+or hardware delivery.
+
+An `espnow_esp32s3_mini` integration-build attempt stopped during ESP-IDF build
+setup before project-source compilation because two framework paths generated
+the same `esp_efuse_fields.c.o` target. The encoder therefore has host-test and
+component-registration proof, but no new firmware compile or link proof.
+
+On September 21, 2026, the portable transport boundary added nonblocking
+transmit submission and completion-polling contracts. The production
+`EspNowTransport` and host fakes implement the new pure virtual methods, while
+the adapter deliberately reports `Unavailable` until its ESP-NOW send path is
+implemented. The adapter host test verifies this explicit result before and
+after initialization while retaining its receive-queue coverage. All six
+sanitizer-backed host tests passed. A clean `espnow_esp32s3_mini` build compiled
+and linked the new interface and adapter methods under ESP-IDF 5.5.4, using
+36,728 bytes of RAM and 742,053 bytes of flash. This contract and build do not
+prove packet submission, send callbacks, radio transmission, or peer delivery;
+no firmware was flashed.
+
+On September 25, 2026, the bounded ESP-NOW adapter send path added broadcast
+peer registration, full-`Packet` submission, one-outstanding-send enforcement,
+callback-safe completion buffering, completion polling, and shutdown cleanup.
+The expanded sanitizer-backed host suite passed, including queued, busy,
+pending, sent, callback-failed, immediate-failure, and cleanup outcomes. A
+focused engine TX test also verifies pre-start rejection, encoding failures,
+transport and completion mapping, stable device-UID conversion, payload and CRC
+validity, and sequence advancement only after accepted submission. A
+clean `espnow_esp32s3_mini` build compiled and linked the adapter under ESP-IDF
+5.5.4, using 36,736 bytes of RAM and 747,805 bytes of flash. The engine now
+encodes and submits caller-provided `TransmitRequest` values and maps completion
+polling through `NodeBootstrap`; the node application trigger remains absent.
+No firmware was flashed; radio transmission and peer delivery remain unproven.
+
+On September 26, 2026, user-supplied receiver output captured the current
+startup-message path on hardware:
+
+```text
+I (19878) EspNowTransport: ESPNOW RX sender=68:67:25:29:6a:52 bytes=220
+I (19888) NodeMessageSink: Logical message delivered: version=1 type=1 length=20 source=114792214391378 sequence=0 payload="VaydeNet node online"
+```
+
+This is direct peer-device runtime evidence that a 220-byte ESP-NOW frame
+crossed the radio link, entered the receive callback and queue, was dequeued,
+passed packet validation, decoded as prototype message type `1`, and reached
+`NodeMessageSink` with the expected 20-byte startup payload. The decimal source
+ID `114792214391378` equals the sender MAC `68:67:25:29:6a:52` packed into the
+low 48 bits, and sequence `0` matches the engine's initial locally originated
+sequence. At that checkpoint, `"VaydeNet node online"` existed only in the node
+startup trigger, so the paired lines also provide hardware proof of the bounded
+application-to-engine-to-ESP-NOW broadcast path and peer delivery. The capture
+does not identify the exact flashed commit, show the sender-side queued/sent
+logs for that exchange, prove the reverse direction by itself, exercise
+controlled rejection cases, or demonstrate sustained queue behavior.
+
+The same checkpoint passed all seven sanitizer-backed host tests, covering
+packet layout, validation, outbound encoding, receive processing, logical
+dispatch, engine transmission, and ESP-NOW receive/transmit queues. After
+cleaning stale PlatformIO target artifacts, the `esp32-s2` firmware build
+compiled and linked the startup trigger and completion-polling loop under
+ESP-IDF 5.5.4, using 33,424 bytes of RAM and 706,582 bytes of flash. The build
+still reports the documented 4 MB board-profile versus 8 MB SDK configuration
+warning. This build proves S2 compilation and linking; the runtime proof above
+comes from the user-supplied peer-device capture.
+
+On September 26, 2026, the node application changed the one-shot startup
+submission into a five-second `Node is alive` heartbeat scheduled from its
+existing 10 ms loop. The loop polls a pending send before attempting another,
+and schedules the next attempt from the last attempt time, including after a
+failed submission or completion. The tick-difference check handles timer
+wraparound. The seven host tests passed; they cover the existing engine and
+transport behavior but do not exercise the application timer. After cleaning
+the known duplicate ESP-IDF target artifact, a DOIT ESP32 firmware build
+compiled and linked the updated loop under ESP-IDF 5.5.4 (35,168 bytes DRAM,
+745,081 bytes flash). This is source, host-test, and firmware-build evidence.
+The updated firmware has not been flashed, and repeated radio transmission or
+peer delivery has not been observed for this change.
+
+On September 26, 2026, the new `espnow_esp32_doit` environment built and linked
+successfully under ESP-IDF 5.5.4 for PlatformIO board
+`esp32doit-devkit-v1`. Its generated configuration selected 4 MB flash, and the
+image used 35,168 bytes of RAM and 745,101 bytes of flash. The build compiled
+the new active-high GPIO activity-LED backend for the board's GPIO 2 LED.
+Regression builds also passed for the addressable-LED `espnow_esp32s3_mini`
+environment and the active-low GPIO `esp32-s2` environment. `git diff --check`
+passed. At this build-only checkpoint, no DOIT board had been flashed, so boot,
+LED polarity on the physical board, ESP-NOW runtime, and peer delivery were
+unverified.
+
+Later on September 26, 2026, the connected DOIT target was identified through
+its CP2102 serial port as an ESP32-D0WD-V3 with 4 MB flash. The
+`espnow_esp32_doit` bootloader, partition table, and firmware were uploaded to
+the verified port, and esptool verified each written image by hash. A second
+upload using PlatformIO's automatic port selection also succeeded and selected
+that same port. At 115200 baud, serial output reached `Calling app_main()`,
+`Bootstrap ready`, `Startup message queued`, `VaydeEngine node loop started`,
+and `Startup message sent`. This proves local application startup, ESP-NOW
+initialization, and local send completion reporting on this board. The initial
+upload failure could not be reproduced, and its specific cause is unknown.
+Physical GPIO 2 LED behavior remained unverified at this upload checkpoint.
+
+Later on September 26, 2026, the user confirmed a successful back-and-forth
+hardware test of the node TX and RX paths between devices. This is
+user-reported bidirectional ESP-NOW exchange validation. The receiver capture
+above documents logical-message delivery in one direction, and the DOIT serial
+output documents local startup and send completion reporting. Paired serial
+traces for both directions and the exact flashed firmware revisions were not
+provided with the bidirectional report; controlled rejection and sustained-load
+behavior remain unverified.
+
 ## Repository State
 
-The active development branch observed on September 18, 2026 is `itzdev691/packet-processing`. It includes the portable receive contract, ESP-NOW adapter translation, host receive-queue regression test, VaydeEngine validation and logical-message dispatch stage, node packet-processing loop, and compatible ESP-NOW sender. `apps/node/dependencies.lock` remains target-sensitive and may change when another node environment is built, so this does not establish a stable multi-target lock policy.
+The development branch observed on September 18, 2026 was `itzdev691/packet-processing`. It includes the portable receive contract, ESP-NOW adapter translation, host receive-queue regression test, VaydeEngine validation and logical-message dispatch stage, node packet-processing loop, and compatible ESP-NOW sender. `apps/node/dependencies.lock` remains target-sensitive and may change when another node environment is built, so this does not establish a stable multi-target lock policy.
+
+The active branch on September 26, 2026 is
+`14-remodeling-node-package-into-txrx`. It contains the bounded outbound-message
+encoding primitive, the portable nonblocking transmit contract, and a bounded
+ESP-NOW broadcast implementation with callback-delivered completion. Engine
+submission and completion mapping are connected through `NodeBootstrap`.
+The node application submits a periodic broadcast heartbeat and polls its completion.
+The receiver capture above supplies runtime radio and peer-delivery proof for
+the earlier one-shot startup broadcast, and the later user-reported hardware
+test confirms TX and RX in both directions for that earlier firmware. Broader
+application submission, destination handling,
+retries, acknowledgements, routing, and relay remain outside the implemented
+checkpoint.
 
 `EngineStartupContext` is constructed from bootstrap-owned hardware identity, node settings, the selected initialized transport, and `NodeMessageSink`. `VaydeEngine::start()` validates and retains those dependencies. The application loop asks the engine to process queued frames; the engine validates, decodes, and dispatches supported messages without returning raw packet data through bootstrap. Persistent message retention remains absent.
 
@@ -275,7 +447,7 @@ The branch contains the cumulative node-bootstrap implementation relative to `ma
 
 ## Merge Readiness
 
-The current software boundary ends after VaydeEngine dequeues one packet, validates version, type, TTL, length, and CRC, decodes supported prototype type `1` into a `Message`, and dispatches it through `MessageSink`. It includes node-side logging of delivered logical-message metadata and explicit validation, decoding, and sink outcomes. It does not claim hardware proof of the new path, message retention, reusable-adapter transmission, peer management, authentication, routing, relay behavior, production provisioning, or finalized cross-transport serialization.
+The receive boundary ends after VaydeEngine dequeues one packet, validates version, type, TTL, length, and CRC, decodes supported prototype type `1` into a `Message`, and dispatches it through `MessageSink`. The engine transmit boundary accepts a broadcast `TransmitRequest`, encodes it with node identity and an engine-owned sequence, submits it through the adapter, and maps asynchronous completion through bootstrap forwarding. The node application now invokes that boundary periodically for a heartbeat. The historical paired receiver logs prove adapter transmission and peer delivery for the earlier one-shot startup broadcast; the later user-reported hardware test confirms bidirectional TX/RX for that earlier firmware. Repeated heartbeat transmission and peer delivery have not yet been observed on hardware. This does not claim archived paired sender/receiver traces for both directions, broader application orchestration, message retention, authentication, routing, relay behavior, production provisioning, or finalized cross-transport serialization.
 
 ## Implemented Checkpoint: Decode and Dispatch Validated Packets
 
@@ -303,7 +475,7 @@ The CRC field is compared directly with the computed `std::uint16_t` value; a tr
 5. `VaydeEngine::processNextPacket()` retains raw packets internally and returns an `EngineProcessResult` containing only processing status and validation status.
 6. `NodeBootstrap` owns `NodeMessageSink`, connects it through `EngineStartupContext`, and forwards only the engine processing result.
 7. `apps/node/src/main.cpp` retains the 10 ms scheduling loop and handles processing failures without interpreting raw packet data.
-8. `EspNowTransport` remains unchanged. Its callback owns callback-argument checks, exact frame-size checks, copying, queue insertion, and receive-activity notification only.
+8. `EspNowTransport` retains the receive callback boundary and now separately owns broadcast-peer registration, packet submission, and callback-safe transmit completion buffering.
 
 ### Test and completion evidence
 
@@ -311,7 +483,7 @@ The sanitizer-backed host suite covers valid packets, every packet-validation re
 
 On September 11, 2026, all four sanitizer-backed host tests passed, `git diff --check` passed, and a clean `espnow_esp32s3_mini` firmware build compiled and linked the production validator and accepted-packet return path into `libVaydeEngine.a`. The image used 36,712 bytes of RAM and 740,717 bytes of flash. This completes the software checkpoint and proves deterministic validation behavior plus firmware integration; it does not prove physical queue draining, radio behavior, packet retention, or logical-message delivery.
 
-Historical user-confirmed node output proves the compatible sender exercised the physical ESP-NOW link, receive queue, and validator before the logical-message boundary was added. Current hardware proof still requires flashing this checkpoint and observing `NodeMessageSink` output, controlled failures for each rejection reason, and sustained traffic showing that the four-slot queue continues to drain without unacceptable loss. Packet retention remains later work.
+Historical user-confirmed node output proves the compatible sender exercised the physical ESP-NOW link, receive queue, and validator before the logical-message boundary was added. The September 26 receiver capture now proves the current decoder-to-`NodeMessageSink` path and bounded startup-broadcast peer delivery on hardware. The later user-reported test validates TX and RX in both directions. Remaining hardware work includes controlled failures for each rejection reason, sustained traffic showing that the four-slot queue continues to drain without unacceptable loss, and archived paired traces identifying both flashed builds. Packet retention remains later work.
 
 ## Later Development Sequence
 
@@ -321,4 +493,4 @@ Historical user-confirmed node output proves the compatible sender exercised the
 4. Exercise missing-key, invalid-transport, invalid-channel, valid-settings, NVS-read-failure, and NVS-write-failure paths.
 5. Replace automatic development defaults with an operator-controlled production provisioning contract before deployment.
 6. Add a bounded persistent inbox or application handler behind `MessageSink`; the current implementation logs delivered messages only.
-7. Add ESP-NOW peer management, transmission, and send-completion handling behind the adapter boundary.
+7. Archive paired sender/receiver serial traces and flashed firmware revisions for both directions of the user-confirmed bidirectional hardware exchange.

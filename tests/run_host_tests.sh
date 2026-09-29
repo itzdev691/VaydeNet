@@ -36,7 +36,17 @@ echo "PASS: Packet layout"
     "${common_flags[@]}" \
     -I"$repo_root/packages/VaydeEngine/include" \
     "$repo_root/packages/VaydeEngine/src/PacketValidation.cpp" \
+    "$repo_root/packages/VaydeEngine/src/PacketMessageEncoder.cpp" \
+    "$repo_root/tests/unit/packet_message_encoder_test.cpp" \
+    -o "$test_build_dir/packet_message_encoder_test"
+"$test_build_dir/packet_message_encoder_test"
+
+"$cxx" \
+    "${common_flags[@]}" \
+    -I"$repo_root/packages/VaydeEngine/include" \
+    "$repo_root/packages/VaydeEngine/src/PacketValidation.cpp" \
     "$repo_root/packages/VaydeEngine/src/PacketMessageDecoder.cpp" \
+    "$repo_root/packages/VaydeEngine/src/PacketMessageEncoder.cpp" \
     "$repo_root/packages/VaydeEngine/src/VaydeEngine.cpp" \
     "$repo_root/tests/unit/vayde_engine_receive_consumer_test.cpp" \
     -o "$test_build_dir/vayde_engine_receive_consumer_test"
@@ -47,10 +57,22 @@ echo "PASS: Packet layout"
     -I"$repo_root/packages/VaydeEngine/include" \
     "$repo_root/packages/VaydeEngine/src/PacketValidation.cpp" \
     "$repo_root/packages/VaydeEngine/src/PacketMessageDecoder.cpp" \
+    "$repo_root/packages/VaydeEngine/src/PacketMessageEncoder.cpp" \
     "$repo_root/packages/VaydeEngine/src/VaydeEngine.cpp" \
     "$repo_root/tests/unit/vayde_engine_message_delivery_test.cpp" \
     -o "$test_build_dir/vayde_engine_message_delivery_test"
 "$test_build_dir/vayde_engine_message_delivery_test"
+
+"$cxx" \
+    "${common_flags[@]}" \
+    -I"$repo_root/packages/VaydeEngine/include" \
+    "$repo_root/packages/VaydeEngine/src/PacketValidation.cpp" \
+    "$repo_root/packages/VaydeEngine/src/PacketMessageDecoder.cpp" \
+    "$repo_root/packages/VaydeEngine/src/PacketMessageEncoder.cpp" \
+    "$repo_root/packages/VaydeEngine/src/VaydeEngine.cpp" \
+    "$repo_root/tests/unit/vayde_engine_transmit_test.cpp" \
+    -o "$test_build_dir/vayde_engine_transmit_test"
+"$test_build_dir/vayde_engine_transmit_test"
 
 "$cxx" \
     "${common_flags[@]}" \

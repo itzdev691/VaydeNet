@@ -1,7 +1,9 @@
 #include "bootstrap/NodeBootstrap.h"
 
+#include <algorithm>
 #include <cstdint>
 
+#include "VaydeNet/transmit/TransmitRequest.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -9,7 +11,76 @@
 namespace {
 
 constexpr char kLogTag[] = "NodeBootstrap";
-constexpr std::uint32_t kReceivePollIntervalMs = 10;
+constexpr std::uint32_t kNodePollIntervalMs = 10;
+constexpr std::uint32_t kHeartbeatIntervalMs = 5000;
+constexpr char kHeartbeatPayload[] = "Node is alive";
+
+static_assert(
+    sizeof(kHeartbeatPayload) - 1 <= kMaximumOutboundPayloadSize,
+    "Heartbeat message exceeds outbound payload capacity"
+);
+
+TransmitRequest makeHeartbeatTransmitRequest() {
+    TransmitRequest request{};
+    request.destination = TransmitDestination::Broadcast;
+    request.message.type = 1;
+    request.message.flags = 0;
+    request.message.ttl = 1;
+    request.message.payload_length =
+        static_cast<std::uint16_t>(sizeof(kHeartbeatPayload) - 1);
+
+    std::copy_n(
+        kHeartbeatPayload,
+        request.message.payload_length,
+        request.message.payload.begin()
+    );
+
+    return request;
+}
+
+bool submitHeartbeat(NodeBootstrap& bootstrap) {
+    const TransmitRequest request = makeHeartbeatTransmitRequest();
+
+    switch (bootstrap.tryTransmit(request)) {
+        case EngineTransmitStatus::Queued:
+            ESP_LOGI(kLogTag, "Heartbeat queued");
+            return true;
+
+        case EngineTransmitStatus::Busy:
+            ESP_LOGW(kLogTag, "Transmit transport is busy");
+            break;
+
+        case EngineTransmitStatus::InvalidMessageType:
+            ESP_LOGE(kLogTag, "Invalid heartbeat message type");
+            break;
+
+        case EngineTransmitStatus::InvalidMessageTtl:
+            ESP_LOGE(kLogTag, "Invalid heartbeat message TTL");
+            break;
+
+        case EngineTransmitStatus::InvalidMessageLength:
+            ESP_LOGE(kLogTag, "Invalid heartbeat message length");
+            break;
+
+        case EngineTransmitStatus::NotStarted:
+            ESP_LOGE(kLogTag, "VaydeEngine is not started");
+            break;
+
+        case EngineTransmitStatus::TransportNotReady:
+            ESP_LOGE(kLogTag, "Transmit transport is not ready");
+            break;
+
+        case EngineTransmitStatus::Unavailable:
+            ESP_LOGE(kLogTag, "Transmit capability is unavailable");
+            break;
+
+        case EngineTransmitStatus::Failed:
+            ESP_LOGE(kLogTag, "Heartbeat submission failed");
+            break;
+    }
+
+    return false;
+}
 
 const char* packetValidationStatusName(PacketValidationStatus status) {
     switch (status) {
@@ -38,8 +109,13 @@ const char* packetValidationStatusName(PacketValidationStatus status) {
     return "unknown validation result";
 }
 
-void runPacketProcessor(NodeBootstrap& bootstrap) {
-    ESP_LOGI(kLogTag, "VaydeEngine packet processor started");
+void runNodeLoop(NodeBootstrap& bootstrap) {
+    ESP_LOGI(kLogTag, "VaydeEngine node loop started");
+    const TickType_t heartbeat_interval_ticks =
+        pdMS_TO_TICKS(kHeartbeatIntervalMs);
+    TickType_t last_heartbeat_tick =
+        xTaskGetTickCount() - heartbeat_interval_ticks;
+    bool transmit_pending = false;
 
     while (true) {
         const EngineProcessResult process_result =
@@ -88,7 +164,52 @@ void runPacketProcessor(NodeBootstrap& bootstrap) {
                 return;
         }
 
-        vTaskDelay(pdMS_TO_TICKS(kReceivePollIntervalMs));
+        if (transmit_pending) {
+            switch (bootstrap.pollTransmitCompletion()) {
+                case EngineTransmitCompletionStatus::Sent:
+                    ESP_LOGI(kLogTag, "Heartbeat sent");
+                    transmit_pending = false;
+                    break;
+
+                case EngineTransmitCompletionStatus::Failed:
+                    ESP_LOGE(kLogTag, "Heartbeat send failed");
+                    transmit_pending = false;
+                    break;
+
+                case EngineTransmitCompletionStatus::Pending:
+                    break;
+
+                case EngineTransmitCompletionStatus::Empty:
+                    ESP_LOGW(kLogTag, "Heartbeat completion is empty");
+                    transmit_pending = false;
+                    break;
+
+                case EngineTransmitCompletionStatus::NotStarted:
+                    ESP_LOGE(kLogTag, "VaydeEngine is not started");
+                    transmit_pending = false;
+                    break;
+
+                case EngineTransmitCompletionStatus::TransportNotReady:
+                    ESP_LOGE(kLogTag, "Transmit transport is not ready");
+                    transmit_pending = false;
+                    break;
+
+                case EngineTransmitCompletionStatus::Unavailable:
+                    ESP_LOGE(kLogTag, "Transmit completion is unavailable");
+                    transmit_pending = false;
+                    break;
+            }
+        }
+
+        const TickType_t now = xTaskGetTickCount();
+        if (!transmit_pending &&
+            static_cast<TickType_t>(now - last_heartbeat_tick) >=
+                heartbeat_interval_ticks) {
+            last_heartbeat_tick = now;
+            transmit_pending = submitHeartbeat(bootstrap);
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(kNodePollIntervalMs));
     }
 }
 
@@ -147,5 +268,5 @@ extern "C" void app_main() {
             return;
     }
 
-    runPacketProcessor(bootstrap);
+    runNodeLoop(bootstrap);
 }

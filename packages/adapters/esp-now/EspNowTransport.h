@@ -23,6 +23,8 @@ public:
     bool configureChannel(std::uint16_t channel);
     TransportStatus initialize() override;
     TransportReceiveStatus tryReceive(Packet& packet) override;
+    TransportTransmitStatus tryTransmit(const Packet& packet) override;
+    TransportTransmitCompletionStatus pollTransmitCompletion() override;
 
     void setReceiveActivityCallback(
         EspNowReceiveActivityCallback callback,
@@ -36,6 +38,11 @@ private:
         int data_length
     );
 
+    static void onDataSent(
+        const esp_now_send_info_t* send_info,
+        esp_now_send_status_t status
+    );
+
     void enqueueReceivedData(
         const std::uint8_t* data,
         int data_length
@@ -44,9 +51,11 @@ private:
     static EspNowTransport* active_instance_;
 
     QueueHandle_t receive_queue_{nullptr};
+    QueueHandle_t transmit_completion_queue_{nullptr};
     EspNowReceiveActivityCallback receive_activity_callback_{nullptr};
     void* receive_activity_context_{nullptr};
     std::uint8_t channel_{};
+    bool transmit_pending_{false};
     bool initialized_{false};
 
 };

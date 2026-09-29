@@ -2,20 +2,17 @@
 
 #include "esp_log.h"
 
-#if defined(VAYDENET_ACTIVITY_LED_ACTIVE_LOW_GPIO)
-#include "driver/gpio.h"
-#else
+#if defined(VAYDENET_ACTIVITY_LED_ADDRESSABLE)
 #include "led_strip_rmt.h"
+#elif defined(VAYDENET_ACTIVITY_LED_ACTIVE_LOW_GPIO) || \
+    defined(VAYDENET_ACTIVITY_LED_ACTIVE_HIGH_GPIO)
+#include "driver/gpio.h"
 #endif
 
-#if defined(VAYDENET_ACTIVITY_LED_ADDRESSABLE) && \
-    defined(VAYDENET_ACTIVITY_LED_ACTIVE_LOW_GPIO)
-#error "Only one activity LED backend may be selected"
-#endif
-
-#if !defined(VAYDENET_ACTIVITY_LED_ADDRESSABLE) && \
-    !defined(VAYDENET_ACTIVITY_LED_ACTIVE_LOW_GPIO)
-#error "An activity LED backend must be selected"
+#if (defined(VAYDENET_ACTIVITY_LED_ADDRESSABLE) + \
+     defined(VAYDENET_ACTIVITY_LED_ACTIVE_LOW_GPIO) + \
+     defined(VAYDENET_ACTIVITY_LED_ACTIVE_HIGH_GPIO)) != 1
+#error "Exactly one activity LED backend must be selected"
 #endif
 
 namespace {
@@ -26,6 +23,12 @@ constexpr std::uint32_t kWorkerStackSize = 2048;
 
 #if defined(VAYDENET_ACTIVITY_LED_ADDRESSABLE)
 constexpr std::uint32_t kGreenBrightness = 16;
+#elif defined(VAYDENET_ACTIVITY_LED_ACTIVE_LOW_GPIO)
+constexpr int kLedActiveLevel = 0;
+constexpr int kLedInactiveLevel = 1;
+#else
+constexpr int kLedActiveLevel = 1;
+constexpr int kLedInactiveLevel = 0;
 #endif
 
 }  // namespace
@@ -35,7 +38,8 @@ bool Esp32RgbLed::initialize(int gpio_number) {
         return true;
     }
 
-#if defined(VAYDENET_ACTIVITY_LED_ACTIVE_LOW_GPIO)
+#if defined(VAYDENET_ACTIVITY_LED_ACTIVE_LOW_GPIO) || \
+    defined(VAYDENET_ACTIVITY_LED_ACTIVE_HIGH_GPIO)
     gpio_number_ = gpio_number;
 
     const gpio_num_t gpio = static_cast<gpio_num_t>(gpio_number_);
@@ -43,9 +47,9 @@ bool Esp32RgbLed::initialize(int gpio_number) {
     if (
         gpio_reset_pin(gpio) != ESP_OK ||
         gpio_set_direction(gpio, GPIO_MODE_OUTPUT) != ESP_OK ||
-        gpio_set_level(gpio, 1) != ESP_OK
+        gpio_set_level(gpio, kLedInactiveLevel) != ESP_OK
     ) {
-        ESP_LOGE(kLogTag, "Failed to initialize active-low LED");
+        ESP_LOGE(kLogTag, "Failed to initialize GPIO LED");
         gpio_number_ = -1;
         return false;
     }
@@ -94,10 +98,11 @@ bool Esp32RgbLed::initialize(int gpio_number) {
     ) {
         ESP_LOGE(kLogTag, "Failed to create RGB LED task");
 
-#if defined(VAYDENET_ACTIVITY_LED_ACTIVE_LOW_GPIO)
+#if defined(VAYDENET_ACTIVITY_LED_ACTIVE_LOW_GPIO) || \
+    defined(VAYDENET_ACTIVITY_LED_ACTIVE_HIGH_GPIO)
         (void)gpio_set_level(
             static_cast<gpio_num_t>(gpio_number_),
-            1
+            kLedInactiveLevel
         );
         gpio_number_ = -1;
 #else
@@ -127,10 +132,11 @@ void Esp32RgbLed::run() {
         // create several seconds of delayed flashing.
         (void)ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
-#if defined(VAYDENET_ACTIVITY_LED_ACTIVE_LOW_GPIO)
+#if defined(VAYDENET_ACTIVITY_LED_ACTIVE_LOW_GPIO) || \
+    defined(VAYDENET_ACTIVITY_LED_ACTIVE_HIGH_GPIO)
         (void)gpio_set_level(
             static_cast<gpio_num_t>(gpio_number_),
-            0
+            kLedActiveLevel
         );
 #else
         if (
@@ -148,10 +154,11 @@ void Esp32RgbLed::run() {
 
         vTaskDelay(pdMS_TO_TICKS(kFlashDurationMs));
 
-#if defined(VAYDENET_ACTIVITY_LED_ACTIVE_LOW_GPIO)
+#if defined(VAYDENET_ACTIVITY_LED_ACTIVE_LOW_GPIO) || \
+    defined(VAYDENET_ACTIVITY_LED_ACTIVE_HIGH_GPIO)
         (void)gpio_set_level(
             static_cast<gpio_num_t>(gpio_number_),
-            1
+            kLedInactiveLevel
         );
 #else
         (void)led_strip_clear(led_strip_);
