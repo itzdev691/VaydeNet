@@ -227,7 +227,7 @@ This is the current prototype packet used by ESP-NOW examples. It is not the fin
 
 ### WT32-ETH01
 
-`apps/examples/wt32-eth01/ethernet-smoke/` is a tracked standalone experiment. It monitors LAN8720 Ethernet state, probes configured TCP ports, serves a local dashboard, and broadcasts telemetry as the legacy 220-byte `Packet` over ESP-NOW.
+`apps/wt32-eth01/ethernet-smoke/` is a tracked standalone experiment. It monitors LAN8720 Ethernet state, probes configured TCP ports, serves a local dashboard, and broadcasts telemetry as the legacy 220-byte `Packet` over ESP-NOW.
 
 It does not provide a reusable Ethernet transport adapter or connect Ethernet to the node bootstrap.
 
