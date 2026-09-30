@@ -1,0 +1,35 @@
+{
+  "$schema": "https://raw.githubusercontent.com/platformio/platformio-core/develop/platformio/assets/schema/library.json",
+  "name": "VaydeEngine",
+  "version": "0.1.0",
+  "description": "Transport-agnostic embedded communication engine for VaydeNet.",
+  "keywords": [
+    "communication",
+    "networking",
+    "embedded",
+    "transport",
+    "mesh",
+    "vaydenet"
+  ],
+  "homepage": "https://github.com/itzdev691/VaydeNet",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/itzdev691/VaydeNet.git"
+  },
+  "authors": [
+    {
+      "name": "itzdev691",
+      "maintainer": true
+    }
+  ],
+  "license": "Apache-2.0",
+  "frameworks": "*",
+  "platforms": "*",
+  "headers": [
+    "VaydeNet/VaydeEngine.h"
+  ],
+  "build": {
+    "includeDir": "include",
+    "srcDir": "src"
+  }
+}
