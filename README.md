@@ -31,59 +31,44 @@ Destination Device
 
 This separation allows applications to remain independent of the underlying communication technology.
 
-## Features
+## Packages and Downloads
 
-- Hardware-independent communication
-- Transport abstraction
-- Modular architecture
-- Decentralized operation
-- Multi-hop routing support
-- Peer discovery
-- Reliable message delivery
-- Extensible adapter system
-- Designed for resource-constrained embedded devices
+| Package | Source | Purpose |
+| --- | --- | --- |
+| VaydeEngine | [Browse package](packages/VaydeEngine/) · [PlatformIO manifest](packages/VaydeEngine/library.json) | Portable packet and logical-message processing. |
+| Transport adapters | [Browse adapters](packages/adapters/) | Transport implementations. |
+| Platform services | [Browse platforms](packages/platforms/) | Hardware and platform integrations. |
 
-## Goals
+[Download VaydeNet source ZIP](https://github.com/itzdev691/VaydeNet/archive/refs/heads/main.zip)
+includes the packages and applications from the default branch. To download
+another branch, select it on GitHub and use **Code → Download ZIP**.
 
-- Provide one communication API across multiple technologies.
-- Keep applications independent of transport implementation.
-- Support a wide range of communication technologies.
-- Make adding new transports straightforward.
-- Build a lightweight framework suitable for embedded systems.
+These links provide source code, not prebuilt firmware. The PlatformIO manifest
+is included with VaydeEngine; a manifest alone does not establish publication
+to the PlatformIO Registry.
 
-## Architecture
+## Build the Node
 
-VaydeNet acts as the bridge between applications and communication technologies.
+Install [PlatformIO](https://platformio.org/), then clone and build:
 
-```
-Application
-      │
-      ▼
- VaydeNet Core
-      │
- ┌────┴──────────────┐
- │                   │
- ▼                   ▼
-ESP-NOW Adapter   LoRa Adapter
- │                   │
- ▼                   ▼
-ESP-NOW Radio     LoRa Radio
+```sh
+git clone https://github.com/itzdev691/VaydeNet.git
+cd VaydeNet
+pio run --project-dir apps/node --environment espnow_esp32_doit
 ```
 
-Additional adapters can be added without changing application code.
+This builds for the DOIT ESP32 DevKit V1. See
+[apps/node/platformio.ini](apps/node/platformio.ini) for other configured boards.
+The node uses the repository's ESP-IDF components; the engine package alone
+does not provide a complete node application.
 
-## Philosophy
+## Examples and Documentation
 
-Applications should describe **what** they want to communicate.
-
-VaydeNet decides **how** the communication happens.
-
-## Status
-
-VaydeNet is currently under active development and the architecture is evolving.
-
-See [DEVELOPMENT_STATUS.md](DEVELOPMENT_STATUS.md) for the implemented capability boundary, active scaffolds, experiments, and planned milestones.
+- [ESP-NOW sender and receiver](apps/examples/esp-now/README.md).
+- [Development status](DEVELOPMENT_STATUS.md): implemented capabilities,
+  planned transports, and hardware evidence. The current node prototype uses ESP-NOW.
+- [Contributing](CONTRIBUTING.md): development setup, validation, and pull requests.
 
 ## License
 
-License information will be added when the project reaches its first public release.
+[Apache License 2.0](LICENSE).
