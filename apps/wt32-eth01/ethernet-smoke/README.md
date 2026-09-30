@@ -2,7 +2,7 @@
 
 This isolated PlatformIO example uses the WT32-ETH01 LAN8720 interface for
 Ethernet status and the local HTTP dashboard. It sends the canonical 220-byte
-VaydeNet `Packet` directly over ESP-NOW once per second for the existing
+VaydeNet `Packet` through VaydeEngine over ESP-NOW once per second for the existing
 VaydeESP receiver.
 
 The receiver packet layout is unchanged. The previous raw Ethernet II
@@ -19,6 +19,12 @@ LAN8720 Ethernet status
         |          +--> compact packet telemetry
         |
         +--> Ethernet link telemetry
+                  |
+                  v
+          TransmitRequest queue (four entries)
+                  |
+                  v
+          VaydeEngine encoding and CRC
                   |
                   v
           220-byte VaydeNet Packet
@@ -169,3 +175,24 @@ pio device monitor \
 The serial log reports Ethernet state, gateway TCP probes, ESP-NOW
 initialization, station MAC, channel, queued packets, queue failures,
 send-callback results, and the dashboard URL.
+
+## Queued engine transmission
+
+`VaydeBroadcaster` snapshots the configured telemetry into a logical broadcast
+request (prototype type 1, TTL 1). A statically allocated four-entry FreeRTOS
+queue feeds VaydeEngine from the application loop. The engine owns sender-ID
+conversion, sequence assignment, packet encoding, and CRC. The Arduino-compatible
+transport boundary submits only engine-produced packets to ESP-NOW.
+
+Only one radio send is outstanding. Completion is polled before the next request
+is submitted. A full application queue rejects the newest request without
+overwriting older entries; immediate submission failures drop that request and
+increment rejection statistics. Queued/sent counters describe radio submission
+and callback completion, not receiver delivery. Payload length excludes the
+terminating NUL. Sequence starts at zero and advances only on accepted submission.
+
+This bounded integration retains Arduino services and does not use the ESP-IDF
+`packages/node` component. No receive callback is registered by this TX-only example.
+On September 29, 2026, the WT32 firmware build and seven existing host tests passed.
+The host suite verifies engine and shared-adapter behavior; it does not exercise
+this application's new queue on hardware. Flash and peer delivery remain unverified.

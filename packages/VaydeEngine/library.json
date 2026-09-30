@@ -1,0 +1,5 @@
+{
+  "name": "VaydeEngine",
+  "version": "0.1.0",
+  "build": { "includeDir": "include", "srcDir": "src" }
+}
