@@ -31,59 +31,80 @@ Destination Device
 
 This separation allows applications to remain independent of the underlying communication technology.
 
-## Features
+## Packages and Downloads
 
-- Hardware-independent communication
-- Transport abstraction
-- Modular architecture
-- Decentralized operation
-- Multi-hop routing support
-- Peer discovery
-- Reliable message delivery
-- Extensible adapter system
-- Designed for resource-constrained embedded devices
+| Package | Source | Purpose |
+| --- | --- | --- |
+| VaydeEngine | [Browse package](packages/VaydeEngine/) · [PlatformIO manifest](packages/VaydeEngine/library.json) | Portable packet and logical-message processing. |
+| Transport adapters | [Browse adapters](packages/adapters/) | Transport implementations. |
+| Platform services | [Browse platforms](packages/platforms/) | Hardware and platform integrations. |
 
-## Goals
+Download the complete repository from [Releases](https://github.com/itzdev691/VaydeNet/releases)
+using a release's **Source code (zip)** archive, then extract it. The archive
+includes the engine, adapters, platform services, and applications.
 
-- Provide one communication API across multiple technologies.
-- Keep applications independent of transport implementation.
-- Support a wide range of communication technologies.
-- Make adding new transports straightforward.
-- Build a lightweight framework suitable for embedded systems.
+For the latest default-branch source, use
+[Download VaydeNet source ZIP](https://github.com/itzdev691/VaydeNet/archive/refs/heads/main.zip).
+To download another branch, select it on GitHub and use **Code → Download ZIP**.
 
-## Architecture
+These links provide source code, not prebuilt firmware. The PlatformIO manifest
+is included with VaydeEngine; a manifest alone does not establish publication
+to the PlatformIO Registry.
 
-VaydeNet acts as the bridge between applications and communication technologies.
+## Use the C++ Library
 
+After extracting the repository, the reusable library is in
+`packages/VaydeEngine/`. Copy that folder into your application and retain the
+repository's [LICENSE](LICENSE) file with the copied source.
+
+Configure your application's build to:
+
+- use C++17 or later;
+- add `VaydeEngine/include/` to its compiler include paths;
+- compile `VaydeEngine/src/VaydeEngine.cpp`,
+  `VaydeEngine/src/PacketValidation.cpp`,
+  `VaydeEngine/src/PacketMessageDecoder.cpp`, and
+  `VaydeEngine/src/PacketMessageEncoder.cpp` with the application.
+
+These paths are relative to wherever you place the copied `VaydeEngine/`
+folder. Application code can then include the engine's public header:
+
+```cpp
+#include <VaydeNet/VaydeEngine.h>
 ```
-Application
-      │
-      ▼
- VaydeNet Core
-      │
- ┌────┴──────────────┐
- │                   │
- ▼                   ▼
-ESP-NOW Adapter   LoRa Adapter
- │                   │
- ▼                   ▼
-ESP-NOW Radio     LoRa Radio
+
+Your application supplies the transport and startup dependencies through the
+engine's interfaces. Add the adapters and platform services needed for your
+target separately. See the [engine package README](packages/VaydeEngine/README.md)
+for its scope and package layout.
+
+The engine is compiled as part of your application's build. Its current
+`CMakeLists.txt` registers an ESP-IDF component; it is not a standalone CMake
+project. Building `apps/node` is only required when you want the supplied node
+firmware.
+
+## Build the Node Firmware
+
+Keep the complete extracted repository for this build. Install
+[PlatformIO](https://platformio.org/), open a terminal in the extracted
+repository folder (the folder containing this README), then run:
+
+```sh
+pio run --project-dir apps/node --environment espnow_esp32_doit
 ```
 
-Additional adapters can be added without changing application code.
+This builds the node firmware for the DOIT ESP32 DevKit V1. See
+[apps/node/platformio.ini](apps/node/platformio.ini) for other configured boards.
+The node uses the repository's ESP-IDF components; the engine package alone
+does not provide a complete node application.
 
-## Philosophy
+## Examples and Documentation
 
-Applications should describe **what** they want to communicate.
-
-VaydeNet decides **how** the communication happens.
-
-## Status
-
-VaydeNet is currently under active development and the architecture is evolving.
-
-See [DEVELOPMENT_STATUS.md](DEVELOPMENT_STATUS.md) for the implemented capability boundary, active scaffolds, experiments, and planned milestones.
+- [ESP-NOW sender and receiver](apps/examples/esp-now/README.md).
+- [Development status](DEVELOPMENT_STATUS.md): implemented capabilities,
+  planned transports, and hardware evidence. The current node prototype uses ESP-NOW.
+- [Contributing](CONTRIBUTING.md): development setup, validation, and pull requests.
 
 ## License
 
-License information will be added when the project reaches its first public release.
+[Apache License 2.0](LICENSE).
