@@ -69,7 +69,8 @@ ethernet-smoke/
 - `PortMonitor` probes one configured TCP port every two seconds against the
   configured LAN host and retains the latest result for each port.
 - `VaydeBroadcaster` owns Wi-Fi station mode, ESP-NOW channel and peer setup,
-  packet construction, transmission, and sender-side statistics.
+  the logical-request queue, the Arduino transport boundary, and sender-side
+  statistics. VaydeEngine owns packet construction and CRC.
 - `WebDashboard` serves the LittleFS assets and live Ethernet, TCP-probe, and
   ESP-NOW status.
 - `AppConfig` owns the dashboard port, ESP-NOW channel, probe target, probe
@@ -101,11 +102,10 @@ Both devices must use:
 - ESP-NOW channel `1`.
 - An unencrypted ESP-NOW broadcast peer at `FF:FF:FF:FF:FF:FF`.
 
-The packet's `senderID` is derived from the WT32 Wi-Fi station MAC and its
-`sequenceNumber` increments before each send. `length` contains the number of
-telemetry bytes including the terminating null byte, matching the working
-VaydeESP sender. Version, type, flags, TTL, and CRC remain zero until VaydeNet
-defines their canonical values.
+VaydeEngine derives the packet's `senderID` from the WT32 Wi-Fi station MAC.
+`sequenceNumber` starts at zero and advances after an accepted submission.
+`length` counts telemetry bytes excluding the terminating NUL. The engine
+encodes prototype version 1, type 1, TTL 1, flags 0, and a valid CRC.
 
 The ESP-NOW queue result and send callback are sender-side evidence. The
 receiver's serial output or display is required to prove end-to-end reception.
