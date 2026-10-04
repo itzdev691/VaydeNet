@@ -1,4 +1,4 @@
-#include "bootstrap/NodeBootstrap.h"
+#include "VaydeNet/node/NodeBootstrap.h"
 
 #include "NodeSettingsLoader.h"
 #include "VaydeNet/VaydeEngine.h"
@@ -8,6 +8,9 @@
 #ifndef VAYDENET_ACTIVITY_LED_GPIO
 #error "VAYDENET_ACTIVITY_LED_GPIO must be defined"
 #endif
+
+NodeBootstrap::NodeBootstrap(MessageSink& message_sink)
+    : node_message_sink_(message_sink) {}
 
 void NodeBootstrap::indicatePacketReceived(void* context) {
     if (context != nullptr) {

@@ -1,14 +1,9 @@
 idf_component_register(
     SRCS
         "main.cpp"
-        "bootstrap/NodeBootstrap.cpp"
         "NodeMessageSink.cpp"
-        "NodeSettingsLoader.cpp"
     INCLUDE_DIRS
         "."
-        "../../../packages/VaydeEngine/include"
     REQUIRES
-        VaydeEngine
-        esp32
-        esp-now
+        node
 )
