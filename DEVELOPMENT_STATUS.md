@@ -1,6 +1,6 @@
 # VaydeNet Development Status
 
-Snapshot: September 26, 2026
+Snapshot: September 29, 2026
 
 Target bootstrap-branch completion: September 18, 2026
 
@@ -227,7 +227,18 @@ This is the current prototype packet used by ESP-NOW examples. It is not the fin
 
 ### WT32-ETH01
 
-`apps/examples/wt32-eth01/ethernet-smoke/` is a tracked standalone experiment. It monitors LAN8720 Ethernet state, probes configured TCP ports, serves a local dashboard, and broadcasts telemetry as the legacy 220-byte `Packet` over ESP-NOW.
+`apps/wt32-eth01/ethernet-smoke/` is a tracked standalone experiment. It monitors LAN8720 Ethernet state, probes configured TCP ports, serves a local dashboard, and broadcasts telemetry as the legacy 220-byte `Packet` over ESP-NOW.
+
+The WT32 telemetry now enters a static four-entry logical `TransmitRequest` queue,
+then passes through VaydeEngine encoding, sender identity, sequence assignment,
+and CRC before the Arduino-compatible ESP-NOW transport submits it. One send
+remains outstanding until completion is polled; a full queue rejects the newest
+request. The existing interval, channel, Ethernet monitoring, and dashboard remain.
+This integration retains Arduino and does not use `packages/node`.
+
+On September 29, 2026, the WT32 build passed (46,504 bytes RAM; 872,493 bytes flash),
+seven existing host tests passed, and diff whitespace checks passed. These checks
+do not establish application-queue runtime behavior, flash, or peer delivery.
 
 It does not provide a reusable Ethernet transport adapter or connect Ethernet to the node bootstrap.
 

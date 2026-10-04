@@ -29,7 +29,8 @@ bool EthernetNetwork::begin() {
 }
 
 bool EthernetNetwork::ready() const {
-    return linkUp_.load() && dhcpReady_.load() && driverHandle_.load() != nullptr;
+    const Snapshot current = snapshot();
+    return current.linkUp && current.dhcpReady && driverHandle_.load() != nullptr;
 }
 
 bool EthernetNetwork::linkUp() const {
@@ -49,11 +50,14 @@ bool EthernetNetwork::readMac(uint8_t mac[6]) const {
 EthernetNetwork::Snapshot EthernetNetwork::snapshot() const {
     Snapshot current;
     current.linkUp = linkUp_.load();
-    current.dhcpReady = dhcpReady_.load();
     current.linkUpEvents = linkUpEvents_.load();
     current.linkDownEvents = linkDownEvents_.load();
 
     ETH.macAddress(current.mac);
+
+    const IPAddress ipv4 = current.linkUp ? ETH.localIP() : IPAddress();
+    current.dhcpReady = dhcpReady_.load()
+        && static_cast<uint32_t>(ipv4) != 0;
 
     if (current.linkUp) {
         current.speedMbps = ETH.linkSpeed();
@@ -61,7 +65,7 @@ EthernetNetwork::Snapshot EthernetNetwork::snapshot() const {
     }
 
     if (current.dhcpReady) {
-        current.ipv4 = ETH.localIP();
+        current.ipv4 = ipv4;
         current.subnet = ETH.subnetMask();
         current.gateway = ETH.gatewayIP();
         current.dns = ETH.dnsIP();
@@ -92,13 +96,13 @@ void EthernetNetwork::printConfiguration() const {
 }
 
 void EthernetNetwork::printStatus() const {
-    const bool connected = linkUp();
+    const Snapshot current = snapshot();
     Serial.printf(
         "Link: %s, DHCP: %s, speed: %u Mbps, duplex: %s\n",
-        connected ? "up" : "down",
-        dhcpReady_.load() ? "ready" : "waiting",
-        connected ? ETH.linkSpeed() : 0,
-        connected && ETH.fullDuplex() ? "full" : "unknown/half");
+        current.linkUp ? "up" : "down",
+        current.dhcpReady ? "ready" : "waiting",
+        current.speedMbps,
+        current.linkUp && current.fullDuplex ? "full" : "unknown/half");
     Serial.printf(
         "Link-up events: %lu, link-down events: %lu\n",
         static_cast<unsigned long>(linkUpEvents_.load()),

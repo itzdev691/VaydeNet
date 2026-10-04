@@ -50,7 +50,9 @@ function renderPortProbes(portProbes) {
 
   setText(
     "port-probe-target",
-    portProbes.targetAvailable ? portProbes.target : "Waiting for DHCP",
+    portProbes.targetAvailable
+      ? portProbes.target
+      : "Waiting for Ethernet/DHCP",
   );
   setText(
     "probe-sweeps",
@@ -90,6 +92,36 @@ function renderPortProbes(portProbes) {
   container.replaceChildren(...cards);
 }
 
+function renderRouterStatus(network) {
+  const routerConnected =
+    network.linkUp &&
+    network.dhcpReady &&
+    network.gateway &&
+    network.gateway !== "0.0.0.0";
+
+  elements["router-status"].dataset.state = routerConnected
+    ? "connected"
+    : "disconnected";
+  setText(
+    "router-status-label",
+    routerConnected ? "Router connected" : "Router unavailable",
+  );
+  setText(
+    "router-status-detail",
+    !network.linkUp
+      ? "The Ethernet cable or router-side link is down."
+      : !network.dhcpReady
+        ? "Ethernet is linked, but the router has not supplied a DHCP lease."
+        : routerConnected
+          ? "Ethernet is linked and the router supplied a valid gateway."
+          : "DHCP did not supply a usable gateway address.",
+  );
+  setText(
+    "router-status-gateway",
+    network.dhcpReady && network.gateway ? network.gateway : "--",
+  );
+}
+
 function render(status) {
   const { device, network, portProbes, espNow } = status;
   const linkOnline = network.linkUp && network.dhcpReady;
@@ -122,6 +154,7 @@ function render(status) {
   setText("link-up-events", integer.format(network.linkUpEvents));
   setText("link-down-events", integer.format(network.linkDownEvents));
 
+  renderRouterStatus(network);
   renderPortProbes(portProbes);
 
   setText("tx-accepted", integer.format(espNow.queueAccepted));
@@ -151,7 +184,14 @@ function render(status) {
 
 function renderError() {
   elements.connection.dataset.state = "offline";
+  elements["router-status"].dataset.state = "disconnected";
   setText("connection-label", "Status API unavailable");
+  setText("router-status-label", "Router status unavailable");
+  setText(
+    "router-status-detail",
+    "The dashboard cannot read live status from the WT32-ETH01.",
+  );
+  setText("router-status-gateway", "--");
   setText("last-updated", "Unable to refresh status");
 }
 

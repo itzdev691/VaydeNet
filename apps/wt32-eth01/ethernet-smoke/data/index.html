@@ -41,6 +41,29 @@
           </div>
         </section>
 
+        <section
+          class="router-status"
+          id="router-status"
+          data-state="checking"
+          aria-labelledby="router-status-label"
+          aria-live="polite"
+        >
+          <div class="router-status-icon" aria-hidden="true">
+            <span></span>
+          </div>
+          <div class="router-status-copy">
+            <p class="router-status-kicker">Router status</p>
+            <h2 id="router-status-label">Checking connection</h2>
+            <p id="router-status-detail">
+              Waiting for Ethernet and DHCP information from the WT32-ETH01.
+            </p>
+          </div>
+          <div class="router-status-gateway">
+            <span>Gateway</span>
+            <strong class="mono" id="router-status-gateway">--</strong>
+          </div>
+        </section>
+
         <section class="metric-grid" aria-label="Primary status">
           <article class="metric-card accent-card">
             <span class="metric-label">Ethernet link</span>
@@ -108,16 +131,16 @@
         <section class="panel port-panel" aria-labelledby="port-probe-heading">
           <div class="panel-heading">
             <div>
-              <p class="eyebrow">Gateway service reachability</p>
+              <p class="eyebrow">Configured host service reachability</p>
               <h2 id="port-probe-heading">TCP port probes</h2>
             </div>
-            <span class="panel-tag mono" id="port-probe-target">Waiting for DHCP</span>
+            <span class="panel-tag mono" id="port-probe-target">Waiting for Ethernet/DHCP</span>
           </div>
           <div class="probe-grid" id="port-probes" aria-live="polite">
             <article class="probe-card" data-state="pending">
               <span>Probe status</span>
               <strong>Waiting</strong>
-              <small>Gateway unavailable</small>
+              <small>Probe target unavailable</small>
             </article>
           </div>
           <p class="panel-note" id="probe-sweeps">No complete sweep yet</p>

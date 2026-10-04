@@ -202,6 +202,127 @@ h2 {
   color: var(--muted);
 }
 
+.router-status {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: center;
+  margin-bottom: 14px;
+  padding: 22px 24px;
+  border: 1px solid rgba(255, 190, 92, 0.34);
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(255, 190, 92, 0.13), transparent),
+    var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.router-status-icon {
+  width: 50px;
+  height: 50px;
+  display: grid;
+  place-items: center;
+  border-radius: 15px;
+  background: rgba(255, 190, 92, 0.14);
+}
+
+.router-status-icon span {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--warning);
+  box-shadow: 0 0 0 8px rgba(255, 190, 92, 0.12);
+}
+
+.router-status-kicker,
+.router-status-copy p,
+.router-status-gateway span {
+  margin-bottom: 0;
+}
+
+.router-status-kicker {
+  color: var(--warning);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+
+.router-status-copy h2 {
+  margin-top: 5px;
+  font-size: clamp(1.35rem, 3vw, 1.8rem);
+}
+
+.router-status-copy p:last-child {
+  margin-top: 7px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.router-status-gateway {
+  min-width: 180px;
+  padding-left: 22px;
+  border-left: 1px solid var(--border);
+  text-align: right;
+}
+
+.router-status-gateway span,
+.router-status-gateway strong {
+  display: block;
+}
+
+.router-status-gateway span {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.router-status-gateway strong {
+  margin-top: 8px;
+  font-size: 1rem;
+}
+
+.router-status[data-state="connected"] {
+  border-color: rgba(77, 227, 164, 0.38);
+  background: linear-gradient(135deg, rgba(77, 227, 164, 0.15), transparent),
+    var(--surface);
+}
+
+.router-status[data-state="connected"] .router-status-icon {
+  background: var(--accent-soft);
+}
+
+.router-status[data-state="connected"] .router-status-icon span {
+  background: var(--accent);
+  box-shadow: 0 0 0 8px var(--accent-soft);
+}
+
+.router-status[data-state="connected"] .router-status-kicker,
+.router-status[data-state="connected"] #router-status-label {
+  color: var(--accent);
+}
+
+.router-status[data-state="disconnected"] {
+  border-color: rgba(255, 119, 119, 0.42);
+  background: linear-gradient(135deg, rgba(255, 119, 119, 0.16), transparent),
+    var(--surface);
+}
+
+.router-status[data-state="disconnected"] .router-status-icon {
+  background: rgba(255, 119, 119, 0.13);
+}
+
+.router-status[data-state="disconnected"] .router-status-icon span {
+  background: var(--danger);
+  box-shadow: 0 0 0 8px rgba(255, 119, 119, 0.11);
+}
+
+.router-status[data-state="disconnected"] .router-status-kicker,
+.router-status[data-state="disconnected"] #router-status-label {
+  color: var(--danger);
+}
+
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -433,6 +554,18 @@ footer {
     padding-left: 0;
     border-left: 0;
   }
+
+  .router-status {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .router-status-gateway {
+    grid-column: 1 / -1;
+    padding: 16px 0 0;
+    border-top: 1px solid var(--border);
+    border-left: 0;
+    text-align: left;
+  }
 }
 
 @media (max-width: 680px) {
@@ -468,6 +601,20 @@ footer {
 
   .metric-card {
     min-height: 142px;
+  }
+
+  .router-status {
+    grid-template-columns: 1fr;
+    padding: 20px;
+  }
+
+  .router-status-icon {
+    width: 42px;
+    height: 42px;
+  }
+
+  .router-status-gateway {
+    grid-column: auto;
   }
 
   .notice {

@@ -2,7 +2,7 @@
 
 This isolated PlatformIO example uses the WT32-ETH01 LAN8720 interface for
 Ethernet status and the local HTTP dashboard. It sends the canonical 220-byte
-VaydeNet `Packet` directly over ESP-NOW once per second for the existing
+VaydeNet `Packet` through VaydeEngine over ESP-NOW once per second for the existing
 VaydeESP receiver.
 
 The receiver packet layout is unchanged. The previous raw Ethernet II
@@ -13,12 +13,18 @@ broadcast path and experimental EtherType `0x88B5` are no longer used.
 ```text
 LAN8720 Ethernet status
         |
-        +--> DHCP gateway TCP probes
+        +--> configured host TCP probes
         |          |
         |          +--> LittleFS dashboard and /api/status
         |          +--> compact packet telemetry
         |
         +--> Ethernet link telemetry
+                  |
+                  v
+          TransmitRequest queue (four entries)
+                  |
+                  v
+          VaydeEngine encoding and CRC
                   |
                   v
           220-byte VaydeNet Packet
@@ -61,20 +67,22 @@ ethernet-smoke/
 
 - `EthernetNetwork` owns LAN8720 link, DHCP, addressing, and link diagnostics.
 - `PortMonitor` probes one configured TCP port every two seconds against the
-  DHCP gateway and retains the latest result for each port.
+  configured LAN host and retains the latest result for each port.
 - `VaydeBroadcaster` owns Wi-Fi station mode, ESP-NOW channel and peer setup,
-  packet construction, transmission, and sender-side statistics.
+  the logical-request queue, the Arduino transport boundary, and sender-side
+  statistics. VaydeEngine owns packet construction and CRC.
 - `WebDashboard` serves the LittleFS assets and live Ethernet, TCP-probe, and
   ESP-NOW status.
-- `AppConfig` owns the dashboard port, ESP-NOW channel, probe ports, and timing
-  constants.
+- `AppConfig` owns the dashboard port, ESP-NOW channel, probe target, probe
+  ports, and timing constants.
 
 ## TCP port probes
 
-The default probe target is the DHCP gateway. The configured ports are `8080`,
-`42691`, `9443`, and `8081`; edit `kProbePorts` in `include/AppConfig.h` to
-change them. The firmware probes one port every two seconds with a 250 ms
-connection timeout, so a complete four-port sweep takes about eight seconds.
+The default probe target is `192.168.1.100`. Edit `kProbeTargetOctets` in
+`include/AppConfig.h` to change it. The configured ports are `8080`, `42691`,
+`9443`, and `8081`; edit `kProbePorts` in the same file to change them. The
+firmware probes one port every two seconds with a 250 ms connection timeout, so
+a complete four-port sweep takes about eight seconds.
 
 These are TCP connection probes, not ICMP pings. `Open` means the TCP handshake
 succeeded. `Unavailable` combines connection refusal, timeout, and routing
@@ -94,11 +102,10 @@ Both devices must use:
 - ESP-NOW channel `1`.
 - An unencrypted ESP-NOW broadcast peer at `FF:FF:FF:FF:FF:FF`.
 
-The packet's `senderID` is derived from the WT32 Wi-Fi station MAC and its
-`sequenceNumber` increments before each send. `length` contains the number of
-telemetry bytes including the terminating null byte, matching the working
-VaydeESP sender. Version, type, flags, TTL, and CRC remain zero until VaydeNet
-defines their canonical values.
+VaydeEngine derives the packet's `senderID` from the WT32 Wi-Fi station MAC.
+`sequenceNumber` starts at zero and advances after an accepted submission.
+`length` counts telemetry bytes excluding the terminating NUL. The engine
+encodes prototype version 1, type 1, TTL 1, flags 0, and a valid CRC.
 
 The ESP-NOW queue result and send callback are sender-side evidence. The
 receiver's serial output or display is required to prove end-to-end reception.
@@ -168,3 +175,24 @@ pio device monitor \
 The serial log reports Ethernet state, gateway TCP probes, ESP-NOW
 initialization, station MAC, channel, queued packets, queue failures,
 send-callback results, and the dashboard URL.
+
+## Queued engine transmission
+
+`VaydeBroadcaster` snapshots the configured telemetry into a logical broadcast
+request (prototype type 1, TTL 1). A statically allocated four-entry FreeRTOS
+queue feeds VaydeEngine from the application loop. The engine owns sender-ID
+conversion, sequence assignment, packet encoding, and CRC. The Arduino-compatible
+transport boundary submits only engine-produced packets to ESP-NOW.
+
+Only one radio send is outstanding. Completion is polled before the next request
+is submitted. A full application queue rejects the newest request without
+overwriting older entries; immediate submission failures drop that request and
+increment rejection statistics. Queued/sent counters describe radio submission
+and callback completion, not receiver delivery. Payload length excludes the
+terminating NUL. Sequence starts at zero and advances only on accepted submission.
+
+This bounded integration retains Arduino services and does not use the ESP-IDF
+`packages/node` component. No receive callback is registered by this TX-only example.
+On September 29, 2026, the WT32 firmware build and seven existing host tests passed.
+The host suite verifies engine and shared-adapter behavior; it does not exercise
+this application's new queue on hardware. Flash and peer delivery remain unverified.

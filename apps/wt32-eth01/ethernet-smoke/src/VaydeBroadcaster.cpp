@@ -10,6 +10,7 @@
 #include <esp_now.h>
 #include <esp_wifi.h>
 
+#include "VaydeNet/startup/EngineStartupContext.h"
 #include "AppConfig.h"
 #include "EthernetNetwork.h"
 #include "PortMonitor.h"
@@ -109,6 +110,19 @@ bool VaydeBroadcaster::begin() {
         return false;
     }
 
+    outboundQueue_ = xQueueCreateStatic(kQueueDepth, sizeof(TransmitRequest),
+        outboundQueueStorage_, &outboundQueueControl_);
+    std::copy_n(stationMac_, identity_.device_uid.size(), identity_.device_uid.begin());
+    identity_.board_model = "WT32-ETH01";
+    settings_.transport = TransportType::EspNow;
+    settings_.channel = AppConfig::kEspNowChannel;
+    const EngineStartupContext context{identity_, settings_, *this, *this};
+    if (outboundQueue_ == nullptr || engine_.start(context) != EngineStartStatus::Ok) {
+        esp_now_unregister_send_cb();
+        esp_now_deinit();
+        activeInstance_ = nullptr;
+        return false;
+    }
     ready_.store(true);
     Serial.println("VaydeNet WT32-ETH01 ESP-NOW broadcaster");
     Serial.println("Destination: FF:FF:FF:FF:FF:FF");
@@ -128,32 +142,39 @@ bool VaydeBroadcaster::begin() {
 }
 
 void VaydeBroadcaster::update(uint32_t nowMs) {
-    if (!ready_.load()
-        || nowMs - lastTransmitMs_ < AppConfig::kTransmitIntervalMs) {
-        return;
-    }
-
+    if (!ready_.load()) return;
+    drainQueue();
+    if (nowMs - lastTransmitMs_ < AppConfig::kTransmitIntervalMs) return;
     lastTransmitMs_ = nowMs;
     ++attempts_;
-
-    const esp_err_t result = transmit();
-    lastQueueResult_.store(result);
-
-    if (result == ESP_OK) {
-        ++queueAccepted_;
-        packetBytesQueued_ += sizeof(Packet);
-        Serial.printf(
-            "ESP-NOW sequence %lu queued\n",
-            static_cast<unsigned long>(packet_.sequenceNumber));
+    const TransmitRequest request = prepareRequest();
+    if (xQueueSend(outboundQueue_, &request, 0) != pdTRUE) {
+        ++queueRejected_;
+        lastQueueResult_.store(ESP_ERR_NO_MEM);
         return;
     }
+    drainQueue();
+}
 
-    ++queueRejected_;
-    Serial.printf(
-        "ESP-NOW sequence %lu queue rejected: %s (%d)\n",
-        static_cast<unsigned long>(packet_.sequenceNumber),
-        esp_err_to_name(result),
-        static_cast<int>(result));
+void VaydeBroadcaster::drainQueue() {
+    if (transmitPending_) {
+        const auto status = engine_.pollTransmitCompletion();
+        if (status == EngineTransmitCompletionStatus::Pending) return;
+        transmitPending_ = false;
+    }
+    TransmitRequest request{};
+    if (xQueuePeek(outboundQueue_, &request, 0) != pdTRUE) return;
+    const auto status = engine_.tryTransmit(request);
+    if (status == EngineTransmitStatus::Busy) return;
+    xQueueReceive(outboundQueue_, &request, 0);
+    if (status == EngineTransmitStatus::Queued) {
+        transmitPending_ = true;
+        ++queueAccepted_;
+        packetBytesQueued_ += sizeof(Packet);
+    } else {
+        ++queueRejected_;
+        lastQueueResult_.store(ESP_FAIL);
+    }
 }
 
 void VaydeBroadcaster::printStatistics() const {
@@ -206,6 +227,7 @@ void VaydeBroadcaster::onDataSent(
         return;
     }
 
+    instance->completion_.store(static_cast<int>(status));
     instance->deliveryStatusAvailable_.store(true);
     instance->lastDeliveryStatus_.store(status);
 
@@ -217,27 +239,19 @@ void VaydeBroadcaster::onDataSent(
     ++instance->deliveryFailed_;
 }
 
-uint64_t VaydeBroadcaster::senderIdFromMac(const uint8_t mac[6]) {
-    uint64_t senderId = 0;
-    for (size_t index = 0; index < 6; ++index) {
-        senderId = (senderId << 8U) | mac[index];
-    }
-    return senderId;
-}
-
-void VaydeBroadcaster::preparePacket() {
-    packet_ = {};
-    packet_.senderID = senderIdFromMac(stationMac_);
-    packet_.sequenceNumber = ++sequenceNumber_;
-
+TransmitRequest VaydeBroadcaster::prepareRequest() const {
+    TransmitRequest request{};
+    request.message.type = 1;
+    request.message.ttl = 1;
+    auto& payload = request.message.payload;
     const EthernetNetwork::Snapshot network = network_.snapshot();
     const PortMonitor::Snapshot ports = portMonitor_.snapshot();
     const String ipv4 = network.dhcpReady ? network.ipv4.toString() : String("--");
     const String gateway = network.dhcpReady ? network.gateway.toString() : String("--");
 
     int written = std::snprintf(
-        reinterpret_cast<char *>(packet_.payload),
-        sizeof(packet_.payload),
+        reinterpret_cast<char *>(payload.data()),
+        payload.size(),
         "ETH link=%s dhcp=%s ip=%s gateway=%s speed=%luMbps duplex=%s tcp=",
         network.linkUp ? "up" : "down",
         network.dhcpReady ? "ready" : "waiting",
@@ -247,22 +261,22 @@ void VaydeBroadcaster::preparePacket() {
         network.linkUp ? (network.fullDuplex ? "full" : "half") : "unknown");
 
     if (written < 0) {
-        packet_.length = 0;
-        packet_.payload[0] = '\0';
-        return;
+        request.message.payload_length = 0;
+        payload.data()[0] = '\0';
+        return request;
     }
 
     size_t used = std::min(
         static_cast<size_t>(written),
-        sizeof(packet_.payload) - 1);
+        payload.size() - 1);
 
     for (size_t index = 0;
-         index < ports.results.size() && used < sizeof(packet_.payload) - 1;
+         index < ports.results.size() && used < payload.size() - 1;
          ++index) {
         const PortMonitor::Result &probe = ports.results[index];
         written = std::snprintf(
-            reinterpret_cast<char *>(packet_.payload) + used,
-            sizeof(packet_.payload) - used,
+            reinterpret_cast<char *>(payload.data()) + used,
+            payload.size() - used,
             "%s%u:%c",
             index == 0 ? "" : ",",
             probe.port,
@@ -273,29 +287,44 @@ void VaydeBroadcaster::preparePacket() {
         }
         used += std::min(
             static_cast<size_t>(written),
-            sizeof(packet_.payload) - used - 1);
+            payload.size() - used - 1);
     }
 
-    packet_.payload[sizeof(packet_.payload) - 1] = '\0';
-    packet_.length = static_cast<uint16_t>(
-        strnlen(
-            reinterpret_cast<const char *>(packet_.payload),
-            sizeof(packet_.payload))
-        + 1);
-
-    // VaydeNet does not yet define canonical values for version, type, flags,
-    // TTL, or the CRC algorithm. Those fields remain zero instead of inventing
-    // ESP-NOW-specific protocol semantics.
+    payload.data()[payload.size() - 1] = '\0';
+    request.message.payload_length = static_cast<uint16_t>(
+        strnlen(reinterpret_cast<const char*>(payload.data()), payload.size()));
+    return request;
 }
 
-esp_err_t VaydeBroadcaster::transmit() {
-    if (!ready_.load()) {
-        return ESP_ERR_INVALID_STATE;
-    }
+TransportStatus VaydeBroadcaster::initialize() {
+    return ready_.load() ? TransportStatus::Ok : TransportStatus::InitializationFailed;
+}
 
-    preparePacket();
-    return esp_now_send(
-        kBroadcastAddress,
-        reinterpret_cast<const uint8_t *>(&packet_),
-        sizeof(packet_));
+TransportReceiveStatus VaydeBroadcaster::tryReceive(Packet&) {
+    return ready_.load() ? TransportReceiveStatus::Empty : TransportReceiveStatus::NotInitialized;
+}
+
+TransportTransmitStatus VaydeBroadcaster::tryTransmit(const Packet& packet) {
+    if (!ready_.load()) return TransportTransmitStatus::NotInitialized;
+    if (transmitPending_) return TransportTransmitStatus::Busy;
+    completion_.store(-1);
+    const esp_err_t result = esp_now_send(kBroadcastAddress,
+        reinterpret_cast<const uint8_t*>(&packet), sizeof(packet));
+    lastQueueResult_.store(result);
+    if (result != ESP_OK) return TransportTransmitStatus::Failed;
+    sequenceNumber_.store(packet.sequenceNumber);
+    return TransportTransmitStatus::Queued;
+}
+
+TransportTransmitCompletionStatus VaydeBroadcaster::pollTransmitCompletion() {
+    if (!ready_.load()) return TransportTransmitCompletionStatus::NotInitialized;
+    if (!transmitPending_) return TransportTransmitCompletionStatus::Empty;
+    const int result = completion_.exchange(-1);
+    if (result < 0) return TransportTransmitCompletionStatus::Pending;
+    return result == ESP_NOW_SEND_SUCCESS ? TransportTransmitCompletionStatus::Sent
+                                         : TransportTransmitCompletionStatus::Failed;
+}
+
+MessageSinkStatus VaydeBroadcaster::deliver(const Message&) {
+    return MessageSinkStatus::Rejected;
 }

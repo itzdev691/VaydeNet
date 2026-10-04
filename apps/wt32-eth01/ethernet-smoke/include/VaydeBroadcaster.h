@@ -6,12 +6,19 @@
 #include <esp_err.h>
 #include <esp_now.h>
 
-#include <VaydeNet/packet/Packet.h>
+#include <VaydeNet/VaydeEngine.h>
+#include <VaydeNet/transport/TransportInterface.h>
+#include <VaydeNet/message/MessageSink.h>
+#include <VaydeNet/startup/HardwareIdentity.h>
+#include <VaydeNet/config/NodeSettings.h>
+#include <VaydeNet/transmit/TransmitRequest.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/queue.h>
 
 class EthernetNetwork;
 class PortMonitor;
 
-class VaydeBroadcaster final {
+class VaydeBroadcaster final : private TransportInterface, private MessageSink {
 public:
     struct Snapshot {
         bool ready = false;
@@ -42,15 +49,28 @@ private:
     static void onDataSent(
         const uint8_t *peerAddress,
         esp_now_send_status_t status);
-    static uint64_t senderIdFromMac(const uint8_t mac[6]);
-    void preparePacket();
-    esp_err_t transmit();
+    TransmitRequest prepareRequest() const;
+    void drainQueue();
+    TransportStatus initialize() override;
+    TransportReceiveStatus tryReceive(Packet&) override;
+    TransportTransmitStatus tryTransmit(const Packet&) override;
+    TransportTransmitCompletionStatus pollTransmitCompletion() override;
+    MessageSinkStatus deliver(const Message&) override;
+
+    VaydeEngine engine_{};
+    HardwareIdentity identity_{};
+    NodeSettings settings_{};
+    static constexpr size_t kQueueDepth = 4;
+    StaticQueue_t outboundQueueControl_{};
+    uint8_t outboundQueueStorage_[kQueueDepth * sizeof(TransmitRequest)]{};
+    QueueHandle_t outboundQueue_{nullptr};
+    bool transmitPending_{false};
+    std::atomic<int> completion_{-1};
 
     static VaydeBroadcaster *activeInstance_;
 
     EthernetNetwork &network_;
     const PortMonitor &portMonitor_;
-    Packet packet_{};
     uint8_t stationMac_[6]{};
     std::atomic<bool> ready_{false};
     std::atomic<uint32_t> attempts_{0};

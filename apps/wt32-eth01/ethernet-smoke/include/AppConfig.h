@@ -19,7 +19,11 @@ inline constexpr uint32_t kPortProbeIntervalMs = 2000;
 inline constexpr int32_t kPortProbeConnectTimeoutMs = 250;
 inline constexpr uint8_t kEspNowChannel = 1;
 inline constexpr uint16_t kDashboardPort = VAYDENET_DASHBOARD_PORT;
+inline constexpr uint8_t kProbeTargetOctets[] = {192, 168, 1, 100};
 inline constexpr uint16_t kProbePorts[] = {8080, 42691, 9443, 8081};
+static_assert(
+    sizeof(kProbeTargetOctets) / sizeof(kProbeTargetOctets[0]) == 4,
+    "TCP probe target must contain four IPv4 octets");
 inline constexpr size_t kProbePortCount =
     sizeof(kProbePorts) / sizeof(kProbePorts[0]);
 inline constexpr char kHostname[] = "vaydenet-wt32";
