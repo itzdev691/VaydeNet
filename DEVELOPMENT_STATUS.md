@@ -1,12 +1,136 @@
 # VaydeNet Development Status
 
-Snapshot: September 29, 2026
+Snapshot: October 4, 2026
 
 Target bootstrap-branch completion: September 18, 2026
 
 VaydeNet is being developed as a hardware-independent communication framework for embedded systems. The intended application boundary remains independent of ESP-NOW, nRF24L01, LoRa, Bluetooth, Wi-Fi, Ethernet, and future transports.
 
 The active implementation checkpoint is the ESP32 node bootstrap. It can retrieve hardware identity, read a minimal configuration from NVS, select ESP-NOW, initialize a board-specific packet activity LED, apply the configured Wi-Fi channel, initialize ESP-NOW, register a receive callback, log incoming frame metadata, request an LED flash for each exact-sized `Packet` frame, copy that frame into a bounded four-slot FreeRTOS queue, construct an `EngineStartupContext`, hand the initialized dependencies to `VaydeEngine::start()`, and report a specific startup result. After successful startup, the FreeRTOS-backed application loop asks VaydeEngine to process one queued frame and poll any pending transmit completion every 10 ms. It also submits an immediate type-1 broadcast heartbeat with payload `Node is alive` and repeats the attempt every five seconds while no earlier transmission is pending. VaydeEngine validates received frames, decodes supported prototype type `1` into a transport-independent `Message`, and dispatches it through a portable `MessageSink`. The current node sink logs logical-message metadata but does not retain, route, relay, or acknowledge the message.
+
+## Current source checkpoint - October 4, 2026
+
+The shared-node extraction and MicroPython integration are on
+`feat/shared-node-micropython`. The preceding WT32 refactor was merged through
+PR #20; this branch's starting committed tree matches main's `cc56e18` snapshot.
+The shared node component accepts an application-owned `MessageSink`, while
+MicroPython owns its separate Wi-Fi/ESP-NOW session and uses the native engine
+through bindings. Both preserve VaydeEngine's packet validation and encoding boundary.
+
+The MicroPython heartbeat example now catches radio `OSError` without stopping
+receive polling or GPIO pulse expiry. Native status results use interned strings
+to prevent allocation failure from stranding an already queued transmission.
+The new heap-lock and example-loop regressions pass, as do both existing
+MicroPython suites against a freshly rebuilt native unix interpreter and all
+seven sanitizer-backed C++ host tests. The example uses selectable SH1106/SSD1306
+drivers and a nonblocking 500 ms receive pulse on GPIO 24.
+
+The updated native module also compiled and linked for `ESP32_GENERIC_C5`
+under ESP-IDF 5.5.4. Its application image is 1,939,616 bytes, with 92,000 bytes
+left in the application partition. This rebuild followed restoration of missing
+toolchain references in the external temporary build directory. The repository's
+saved combined image remains the September 30 artifact and predates the status
+allocation fix; it was not replaced or flashed.
+
+The incidental `apps/node/dependencies.lock` target change was restored to the
+tracked ESP32-S2 snapshot and excluded from this feature commit. The existing CI workflow
+does not run the MicroPython suites or build this custom interpreter. The dated
+build and hardware entries below retain their original evidence boundaries;
+these new host checks do not establish new device runtime or peer delivery.
+
+## Shared node structure
+
+The shared ESP32 node component now lives in `packages/node`. Its public header
+is `include/VaydeNet/node/NodeBootstrap.h`; bootstrap and settings implementation
+live under `src/`. Applications supply a `MessageSink` whose lifetime covers the
+runtime. `apps/node` retains heartbeat scheduling and its logging sink. The shared
+component owns the engine and platform/transport dependencies, but creates no
+scheduler task. Callers must serialize processing, submission, and completion polling.
+
+Both WT32 branch layouts place the application at
+`apps/wt32-eth01/ethernet-smoke`. Its engine include path now resolves from that
+location. Its Arduino Ethernet, probe, and dashboard services remain. The later
+WT32 queue integration below replaces direct packet construction with VaydeEngine.
+Porting these services to the shared ESP-IDF node remains outstanding.
+No new flash, hardware runtime, or peer-delivery evidence follows from this extraction.
+
+Structural verification on September 29, 2026: Git object connectivity passed;
+all tracked files outside the extraction, build wiring, and this status document
+were compared against each worktree's base and preserved. Both branch-specific
+WT32 firmware builds and dashboard JavaScript syntax checks passed. Seven host
+tests passed in each worktree. The extracted node compiled and linked for DOIT
+ESP32 in both worktrees; shared node sources match across both.
+WT32 builds used the existing external PlatformIO store. The node build used the
+default store with a temporary esptool 5.2.0 module because its editable esptool
+installation referenced a missing package. No firmware was flashed.
+
+Branch consolidation on September 29, 2026: the identical shared-node structural
+patch was copied into the checked-out `itzdev691/wt32-refactor` working tree and
+all 114 relevant files were compared with the verified refactor worktree. The
+remote `move-wt32-under-apps` branch and its redundant detached worktree were
+removed. A local recovery tag, `archive/move-wt32-under-apps-2026-09-29`, retains
+its former `46e322d` tip. The structural patch remains uncommitted and unpushed
+on `itzdev691/wt32-refactor`; at consolidation, the remote refactor branch pointed to
+`819e3ae`.
+
+## Library installation and repository review — September 30, 2026
+
+At the September 30 review, the checked-out branch was `itzdev691/wt32-refactor`
+at `7768d3e`, matching its remote tip. The shared-node extraction was uncommitted, including the new
+`packages/node` directory. The refreshed `origin/main` points to `0d15bc1`.
+The branch's engine manifest lacks the package metadata present on `main`, and
+its tree lacks `packages/VaydeEngine/README.md`. Its root README also presents
+multi-hop routing, peer discovery, and reliable delivery as features although
+those capabilities remain outside the implemented checkpoint. The firmware CI
+matrix omits the configured `espnow_esp32_doit` target and the WT32 application.
+
+The PlatformIO Registry lists `itzdev691/VaydeEngine` version `0.1.0`.
+An isolated native PlatformIO project installed that exact registry release,
+compiled all four engine sources with C++17, and linked successfully. A separate
+run using `symlink:///Volumes/ExtVault/VaydeNet/packages/VaydeEngine` also passed;
+its executable verified that an unstarted engine reports `NotStarted`.
+All seven sanitizer-backed repository host tests and `git diff --check` passed.
+These checks establish core package installation and host software behavior;
+no new firmware build, flash, hardware runtime, or peer-delivery test was performed.
+
+The bare engine package excludes ESP32 platform services, transport adapters,
+and `packages/node`. Applications supply persistent startup dependencies,
+a `TransportInterface`, and a `MessageSink`, and serialize engine calls.
+The package's CMake file registers an ESP-IDF component rather than a standalone
+CMake project. Registry installation does not establish complete node firmware.
+
+## MicroPython external module — September 30, 2026
+
+`packages/bindings/micropython` now contains native `_vaydenet` bindings and
+MicroPython build files. The production C++ engine retains validation, encoding,
+CRC, sender conversion, and sequence state. A bounded native packet bridge
+connects it to the Python `vaydenet.py` adapter, which uses MicroPython's existing
+`network` and `espnow` modules. The standalone ESP-IDF adapter and node bootstrap
+are not linked: MicroPython owns Wi-Fi and ESP-NOW initialization here.
+Application code sends logical bytes and receives lossless message dictionaries.
+One engine is supported, with serialized calls from one MicroPython task;
+initialization resets engine state, including after a soft reset. There is no
+background engine task. The example at `apps/examples/micropython-node/main.py`
+supplies the five-second heartbeat and handles invalid received packets.
+
+Both tests in `tests/micropython` passed using a MicroPython v1.29.0 unix build:
+the actual native engine passed binary round-trip, sender identity, sequence,
+CRC-rejection, queue-capacity, transmit-completion, and reinitialization checks;
+the Python adapter passed with the actual native engine and a fake radio,
+including recovery after send exceptions and corrupt packets. Seven existing
+sanitizer-backed repository host tests also passed.
+
+A MicroPython v1.29.0 `ESP32_GENERIC_C5` firmware build passed under ESP-IDF 5.5.4
+and Python 3.11. Symbol inspection confirmed the native module, VaydeEngine
+transmit path, and MicroPython ESP-NOW module in the final ELF. The application
+image is 1,939,040 bytes, with 92,576 bytes (about 5%) of application-partition
+space left. The combined image saved at
+`apps/examples/micropython-node/build/firmware.bin` is 1,996,384 bytes and starts
+at flash offset `0x2000`. Build outputs are ignored by Git; the bindings, example,
+tests, and documentation remain uncommitted. No board was flashed. Interpreter
+startup on C5 hardware, actual radio behavior, soft-reset behavior on the board,
+and peer delivery remain unverified. This is a prototype broadcast-only module.
+
 
 ## Current Startup Path
 
@@ -81,7 +205,7 @@ The S3 and C5 targets select addressable RGB LEDs on GPIO 48 and GPIO 27. The DO
 
 ### ESP32 packet activity LED
 
-`packages/platforms/esp32/Esp32RgbLed.cpp` provides addressable and active-low GPIO backends behind one `initialize()` and `flash()` interface. A dedicated FreeRTOS task performs the 60 ms flash so the ESP-NOW receive callback does not delay for the LED duration. Accumulated task notifications are cleared together to prevent a packet burst from creating a long delayed flash backlog.
+`packages/platforms/esp32/Esp32RgbLed.cpp` provides addressable, active-low GPIO, and active-high GPIO backends behind one `initialize()` and `flash()` interface. A dedicated FreeRTOS task performs the 60 ms flash so the ESP-NOW receive callback does not delay for the LED duration. Accumulated task notifications are cleared together to prevent a packet burst from creating a long delayed flash backlog.
 
 `NodeBootstrap` registers this indicator through an adapter callback. The current callback runs after the incoming frame passes the exact-size check and before queue insertion. The LED therefore indicates radio receipt of a correctly sized frame even when the four-slot receive queue is already full and drops that frame. It does not indicate CRC validation, packet processing, queue consumption, or VaydeEngine delivery. The callback can later be moved to the processing boundary without changing the LED driver.
 
@@ -144,7 +268,7 @@ results through nonblocking completion polling.
 
 ### VaydeEngine startup handoff
 
-`packages/VaydeEngine` is now an ESP-IDF component containing the portable `VaydeEngine` class. `NodeBootstrap` owns the engine alongside the hardware identity, settings, selected transport, and concrete `NodeMessageSink`. After successful transport initialization, bootstrap constructs the non-owning `EngineStartupContext` reference bundle and passes it to `VaydeEngine::start()`.
+`packages/VaydeEngine` is now an ESP-IDF component containing the portable `VaydeEngine` class. `NodeBootstrap` owns the engine alongside the hardware identity, settings, and selected transport. The application owns the concrete `NodeMessageSink` and supplies it to bootstrap. After successful transport initialization, bootstrap constructs the non-owning `EngineStartupContext` reference bundle and passes it to `VaydeEngine::start()`.
 
 The engine rejects repeated startup, a missing board model, unsupported protocol or settings versions, and an unspecified transport. After validation, it retains pointers to the bootstrap-owned dependencies and reports `EngineStartStatus::Ok`. Bootstrap maps any rejected start to `NodeBootstrapStatus::EngineStartupFailed`.
 
@@ -450,7 +574,7 @@ application submission, destination handling,
 retries, acknowledgements, routing, and relay remain outside the implemented
 checkpoint.
 
-`EngineStartupContext` is constructed from bootstrap-owned hardware identity, node settings, the selected initialized transport, and `NodeMessageSink`. `VaydeEngine::start()` validates and retains those dependencies. The application loop asks the engine to process queued frames; the engine validates, decodes, and dispatches supported messages without returning raw packet data through bootstrap. Persistent message retention remains absent.
+`EngineStartupContext` is constructed from bootstrap-owned hardware identity, node settings, the selected initialized transport, and the application-owned `NodeMessageSink`. `VaydeEngine::start()` validates and retains those dependencies. The application loop asks the engine to process queued frames; the engine validates, decodes, and dispatches supported messages without returning raw packet data through bootstrap. Persistent message retention remains absent.
 
 The packet-validation checkpoint spans the engine, node application, compatible ESP-NOW sender, host tests, build registration, and this status document. The validator header, source, and focused unit test are included as tracked source for the checkpoint.
 
@@ -484,7 +608,7 @@ The CRC field is compared directly with the computed `std::uint16_t` value; a tr
 3. The VaydeEngine component registration compiles the validator into host and firmware targets.
 4. `PacketMessageDecoder` converts validated prototype type `1` packets into transport-independent `Message` values and excludes the wire CRC.
 5. `VaydeEngine::processNextPacket()` retains raw packets internally and returns an `EngineProcessResult` containing only processing status and validation status.
-6. `NodeBootstrap` owns `NodeMessageSink`, connects it through `EngineStartupContext`, and forwards only the engine processing result.
+6. The application owns `NodeMessageSink`; `NodeBootstrap` references it, connects it through `EngineStartupContext`, and forwards only the engine processing result.
 7. `apps/node/src/main.cpp` retains the 10 ms scheduling loop and handles processing failures without interpreting raw packet data.
 8. `EspNowTransport` retains the receive callback boundary and now separately owns broadcast-peer registration, packet submission, and callback-safe transmit completion buffering.
 

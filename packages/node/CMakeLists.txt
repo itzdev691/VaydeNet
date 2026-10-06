@@ -1,0 +1,13 @@
+idf_component_register(
+    SRCS
+        "src/NodeBootstrap.cpp"
+        "src/NodeSettingsLoader.cpp"
+    INCLUDE_DIRS
+        "include"
+    PRIV_INCLUDE_DIRS
+        "src"
+    REQUIRES
+        VaydeEngine
+        esp32
+        esp-now
+)

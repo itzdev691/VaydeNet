@@ -1,4 +1,5 @@
-#include "bootstrap/NodeBootstrap.h"
+#include "VaydeNet/node/NodeBootstrap.h"
+#include "NodeMessageSink.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -220,7 +221,8 @@ extern "C" void app_main() {
     vTaskDelay(pdMS_TO_TICKS(2000));
     ESP_LOGI(kLogTag, "Node firmware starting");
 
-    static NodeBootstrap bootstrap;
+    static NodeMessageSink message_sink;
+    static NodeBootstrap bootstrap(message_sink);
     const NodeBootstrapStatus status = bootstrap.run();
 
     switch (status) {
