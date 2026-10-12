@@ -199,9 +199,244 @@ Failures are returned through `Esp32BoardInfoStatus`. This identifies the physic
 
 ### ESP32 target environments
 
-`apps/node/platformio.ini` defines node targets for the ESP32-S3 DevKitC-1, WEMOS LOLIN S3 Mini, ESP32-C5 DevKitC-1, DOIT ESP32 DEVKIT V1, and the ESP32-S2 Flipper Wi-Fi Developer Board. The targets use the pioarduino ESP-IDF 5.5.4-compatible platform package. The C5 target uses `apps/node/sdkconfig-c5.defaults` to select 4 MB flash and route logs through USB Serial/JTAG. The DOIT target uses `apps/node/sdkconfig-doit.defaults` to match its 4 MB flash. All targets use a monitor rate of 115200 baud.
+`apps/node/platformio.ini` defines node targets for the ESP32-S3 DevKitC-1, WEMOS LOLIN S3 Mini, ESP32-C5 DevKitC-1, DOIT ESP32 DEVKIT V1, the ESP32-S2 Flipper Wi-Fi Developer Board, and the Waveshare ESP32-P4-WIFI6-POE-ETH with onboard ESP32-C6. The targets use the pioarduino ESP-IDF 5.5.4-compatible platform package. The C5 target uses `apps/node/sdkconfig-c5.defaults` to select 4 MB flash and route logs through USB Serial/JTAG. The DOIT target uses `apps/node/sdkconfig-doit.defaults` to match its 4 MB flash. All targets use a monitor rate of 115200 baud.
 
 The S3 and C5 targets select addressable RGB LEDs on GPIO 48 and GPIO 27. The DOIT target selects its active-high blue LED on GPIO 2. The Flipper S2 target selects the active-low green LED on GPIO 5. Its current `esp32-s2-saola-1` PlatformIO board profile declares 4 MB flash while the shared `sdkconfig.defaults` declares 8 MB, producing a flash-size mismatch warning that must be resolved before treating the S2 profile as final.
+
+### ESP32-P4 with an onboard ESP32-C6: wireless dependencies
+
+`packages/platforms/esp32/idf_component.yml` adds `espressif/esp_hosted`
+version `2.12.8` and `espressif/esp_wifi_remote` version `1.6.5` only when the
+ESP-IDF target is `esp32p4`. Both declare ESP-IDF `>=5.3` compatibility; Wi-Fi
+Remote accepts ESP-Hosted `>=2.11`. Wi-Fi Remote is a public component dependency
+so consumers can use its Wi-Fi compatibility headers. Other chip targets keep
+their existing dependency selection, and the portable engine has no new dependency.
+
+ESP-Hosted bridges the P4 application processor to a wireless coprocessor such as
+an onboard C6. Wi-Fi Remote exposes the standard Wi-Fi API through that bridge.
+The user identified the board as Waveshare ESP32-P4-WIFI6-POE-ETH on
+October 11, 2026. Its schematic confirms 32 MB NOR flash, onboard C6 SDIO
+(clock 18, command 19, data 14/15/16/17), C6 enable/reset GPIO 54 and
+CH343P Type-C UART logging on P4 TX 37 / RX 38. These settings are explicit
+in `apps/node/sdkconfig-p4-c6.defaults`, including eight CustomRpc handlers.
+
+The `esp32p4_c6` environment retains the pre-v3 P4 chip variant and its
+separate revision defaults. `esp32p4_c6_rev3` uses the production P4 chip
+variant and minimum revision 3.0. Both override flash metadata to 32 MB.
+The board name alone does not establish silicon revision; select the matching
+environment from the chip identification or boot log before flashing.
+Activity LED GPIO -1 leaves the indicator unavailable. The existing local
+pre-v3 SDK file was updated to 32 MB, UART0 and eight handlers because saved
+SDK settings override defaults.
+
+The P4-only bridge supplies the existing `EspNowTransport` ESP-NOW calls;
+the C6 must run the matching overlay. See
+[board configuration and flashing](apps/node/ESP32-P4-WIFI6-POE-ETH.md).
+The P4 flash/capture established P4 v1.3 boot, C6 SDIO connection and remote
+Wi-Fi startup, then an ESP-NOW CustomRpc timeout with the original C6 firmware.
+The C6 subsequently received the verified ESPHome v2.12.13 ESP-NOW prebuilt;
+the user subsequently confirmed working heartbeat sending on October 11, 2026.
+Receiving-peer delivery and sustained traffic remain unverified.
+
+Verification on October 10, 2026: the ESP-IDF component manager validated the
+manifest and resolved both pinned versions for P4. An isolated P4 Wi-Fi dependency
+test compiled the platform component and libraries and linked a firmware image
+under pioarduino `55.03.38` / ESP-IDF `5.5.4`. The test used the
+`esp32-p4-evboard` profile with `CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y` and minimum
+revision 1; without that setting, the profile's linker script conflicted with
+ESP-IDF's revision-3 defaults. That isolated Wi-Fi test does not establish a
+successful build of the complete node application or identify the user's board.
+
+The isolated C5 node build resolved only its original LED-strip dependency,
+confirming the P4-only rules. It stopped in existing uncommitted nRF24 code:
+`Nrf24Packet` is 40 bytes while its static assertion expects 32, and
+`Nrf24Transport::initialize()` has an unmatched opening brace. Those files were
+preserved. No complete C5 build success is claimed for this checkpoint.
+
+The subsequent `esp32p4_c6` environment check on October 10, 2026 passed PlatformIO
+configuration parsing, dependency resolution and generation of the specified
+ESP-IDF settings. Its complete node build, run from an isolated copy with the
+repository's actual package sources, stopped on the same nRF24 packet-size and
+brace errors before firmware linking. No P4 node firmware build success is claimed.
+
+Later on October 10, 2026, the reported nRF24 source errors were corrected.
+The user's `packed` attribute correction in `Nrf24Packet.h` was retained, and its
+32-byte static assertion passed. The TX_ADDR transaction block was moved inside
+`Nrf24Transport::initialize()`, with a final `InitializationFailed` return while
+radio startup remains incomplete. The adapter compiled and produced
+`libnrf24l01.a` for P4. The full P4 node now reaches firmware linking but fails
+on undefined `esp_now_*` symbols, including `esp_now_init` and `esp_now_send`;
+the selected Hosted/Wi-Fi Remote libraries do not supply the existing adapter's
+ESP-NOW implementation. The isolated C5 node build compiled and linked
+successfully (41,636 bytes RAM, 883,390 bytes flash). Git whitespace checks
+passed. No flash, hardware register response or peer-delivery test was performed.
+
+On October 11, 2026, added `packages/adapters/esp-now-hosted/` as an ESP-IDF
+component wrapper around the downloaded, pinned ESPHome P4 bridge. It compiles
+the upstream implementation exactly once, providing its logging-tag macro
+without modifying the source snapshot. The existing ESP-NOW adapter privately
+requires the bridge only for P4; native-radio targets register an empty wrapper
+component. The wrapper manifest pins ESP-Hosted 2.12.8 and Wi-Fi Remote 1.6.5,
+and the P4 SDK defaults enable peer data transfer with eight custom handlers.
+The upstream host source remains GPLv3; the original license files are retained.
+
+Fresh full node builds from isolated application copies against the actual
+repository package sources passed for both `esp32p4_c6` and `espnow_esp32c5`
+under ESP-IDF 5.5.4 / GCC 14.2. The P4 firmware now links successfully
+(22,060 bytes RAM, 458,010 bytes flash); its ELF defines all nine `esp_now_*`
+functions used by the adapter, and its link map includes the host bridge object.
+The generated P4 configuration enables peer data transfer and eight handlers.
+The C5 build retains its original sizes (41,636 bytes RAM, 883,390 bytes flash),
+excludes bridge compilation and both P4 managed dependencies, and links native
+ESP-NOW. Original application lockfile and SDK files were preserved. Upstream
+source hashes and identical host/C6 protocol headers were verified; Git
+whitespace checks passed. No commit or push.
+
+This establishes P4 host build/link integration only. The downloaded C6 overlay
+has not been applied to a companion project, built, or flashed. Board wiring
+was subsequently verified from the Waveshare schematic; coprocessor startup,
+send/receive callbacks and peer delivery remain unverified. Upstream add/delete peer operations are asynchronous: successful
+submission does not confirm a C6-side change. Callback threading and peer error
+handling still require hardware validation before treating the path as working.
+
+On October 11, 2026, a user-provided runtime excerpt reported repeated task
+watchdog timeouts: CPU 0 was running `main`, and `IDLE0` did not run in time.
+The user subsequently clarified that this was the newly received board's
+factory firmware, not VaydeNet. The excerpt does not identify the stalled call.
+Its MEPC/RA addresses did not resolve against the isolated VaydeNet P4 ELF;
+no matching factory ELF was available. No VaydeNet runtime failure was established. The normal node loop already delays
+10 ms at the configured 100 Hz tick rate, so removing idle-task watchdog
+coverage or adding an arbitrary loop delay is not an established fix.
+
+Added P4-only startup checkpoints before Wi-Fi initialization/configuration,
+Wi-Fi start/channel selection and ESP-NOW initialization, plus a completion
+checkpoint for ESP-NOW init. Enabled `CONFIG_ESP_SYSTEM_USE_FRAME_POINTER=y`
+in P4 defaults and in the existing ignored P4 SDK configuration so a rebuild
+uses full stack traces. No other existing SDK settings or application lockfile
+were changed. A fresh isolated P4 node build passed (22,060 bytes RAM,
+483,078 bytes flash); the generated configuration and compiler commands confirm
+frame pointers, with task-watchdog monitoring still enabled. This is diagnostic
+build evidence only: no new flash or reproduction, root-cause confirmation,
+C6 connection proof or runtime repair was established. These diagnostics
+prepare future VaydeNet validation; they do not repair or diagnose the factory
+application without its matching sources, ELF and startup trace.
+
+
+On October 11, 2026, the Waveshare-specific pre-v3 and v3 environments both
+compiled and linked against the actual repository package sources from an
+isolated application copy under ESP-IDF 5.5.4. The initial v3 bootloader was
+24,736 bytes, overlapping the partition table at 0x8000 by 160 bytes.
+PlatformIO reported success despite the image-merge error. Warning-level
+bootloader logging resolved the overlap, following the vendor's example.
+
+Final verification: both combined images assembled successfully. Pre-v3 uses
+22,540 bytes RAM and 494,216 bytes flash; v3 uses 22,604 bytes RAM and 494,168
+bytes flash. Bootloaders are 22,000 and 22,176 bytes, leaving 2,576 and 2,400
+bytes before the partition table. Generated settings match 32 MB flash, UART0,
+the explicit SDIO/reset pins, eight handlers and the respective silicon
+configuration (SDK minimum/full maximum 1/199 and 300/399).
+The current PlatformIO-generated image header does not encode those revision
+limits, so upload acceptance cannot identify compatible silicon.
+The physical revision must be established independently before upload.
+The original dependency lockfile and other saved SDK files were preserved.
+Git whitespace checks passed. No commit, push, flash or runtime test.
+
+
+Later on October 11, 2026, the user supplied a VaydeNet startup log identifying
+P4 revision v1.3, ESP-IDF 5.5.4, 360 MHz and console UART GPIO37/38. This confirms
+user-reported P4 application boot through app_main and selects esp32p4_c6 for
+this device. It is separate from the earlier factory watchdog excerpt.
+The node stopped at esp_wifi_init with "Transport not initialized, call
+esp_hosted_init() first"; the Hosted 2.12.8 source rejects reconfiguration
+without its transport configuration. The adapter was missing that first call.
+
+Added checked esp_hosted_init before esp_wifi_init, only on P4, with a direct
+private Hosted dependency for its public API header. Native targets retain
+their existing startup. The LED driver now handles GPIO -1 as disabled before
+calling GPIO or RMT APIs; NodeBootstrap omits its activity callback when the
+indicator is disabled. The earlier LED error was nonfatal and did not cause
+the transport failure. C6 link, installed companion version/overlay, Wi-Fi and
+ESP-NOW initialization, and peer delivery were not reached in the supplied log.
+The repaired runtime has not been flashed or observed by the agent.
+
+
+Repair build verification on October 11, 2026: fresh isolated full node builds
+against repository package sources passed for esp32p4_c6 (23,240 bytes RAM,
+680,236 bytes flash) and espnow_esp32c5 (41,636 bytes RAM, 883,488 bytes flash).
+Both combined images assembled successfully. The P4 bootloader remains 22,000
+bytes, leaving 2,576 bytes before the partition table, and its ELF defines
+esp_hosted_init. The C5 ELF contains native esp_now_init without esp_hosted_init;
+its component metadata excludes Hosted/Wi-Fi Remote and compile commands exclude
+the bridge. Original app lockfile/SDK files were preserved. Git whitespace
+checks passed. The repair is source/build verified only; no agent flash,
+corrected runtime, C6 firmware or peer-delivery proof. No commit or push.
+
+
+Agent flash/runtime verification on October 11, 2026: detected the P4 at
+/dev/cu.usbmodem5B910669381 through its CH343 UART bridge. Espressif's chip and
+flash queries confirmed revision v1.3 and 32 MB flash. A clean build of the
+actual checkout's esp32p4_c6 passed with 23,240 bytes RAM and 680,236 bytes flash;
+combined image assembly and bootloader/partition offset checks passed.
+Upload wrote the bootloader at 0x2000, partition table at 0x8000 and application
+at 0x10000, with all three flash hashes verified. Previous P4 build artifacts
+were preserved in a temporary task directory. App lockfile and saved SDK files
+were unchanged by this build. No C6 firmware was written.
+
+A bounded UART capture after reset matched the new ELF SHA prefix d8b49ec7e.
+Runtime now logs LED disabled and esp_hosted_init, identifies the esp32c6
+slave, activates SDIO transport, and proceeds through Wi-Fi storage/mode/start
+and channel selection. Neither prior missing-Hosted-init nor invalid GPIO
+error recurred. The C6 advertises firmware version 0.0.0 and Hosted warns of a
+version mismatch. At esp_now_init, Req_CustomRpc (0x184) times out and
+NodeBootstrap returns TransportInitializationFailed. This verifies P4 flash,
+boot, C6 link and remote Wi-Fi startup; it does not establish ESP-NOW init,
+node readiness or peer delivery. A matching Hosted 2.12.8 C6 companion with
+ESP-NOW overlay remains required; that companion is still unbuilt/unflashed.
+No commit or push.
+
+
+C6 flash verification on October 11, 2026: the Flipper USB-UART bridge at
+/dev/cu.usbmodemflip_O14njer1 reached ESP32-C6FH8 v0.2 with 8 MB flash. Secure
+Boot and flash encryption were disabled. The existing partition table has
+1.5 MB ota_0 at 0x10000 and ota_1 at 0x190000; a valid OTA selector sequence 1
+selects ota_0. The canonical ESPHome v2.12.13 application image is 1,240,368
+bytes, fits that partition, declares C6 revisions v0.0-v0.99, and passed image
+checksum/SHA validation. Its published SHA256 is
+09e4ed4ff648444ad045c1d934825af407648f58898586ce9f4275e53fdb23f6.
+The release includes the ESP-NOW overlay; its protocol header is byte-identical
+to the downloaded VaydeNet host header. The older v2.12.8 prebuilt was published
+before that overlay and is not the selected companion.
+
+Backed up the original first 64 KB and the full active 1.5 MB application
+partition outside the Git checkout under
+/Volumes/ExtVault/VaydeNet-device-backups/c6-20261012T032942Z. Long reads were
+interrupted; passive UART captures showed recurring C6 ROM download-mode
+restarts, consistent with the P4 Hosted reconnection/reset loop. Smaller
+individually verified reads completed the application backup. No vendor/tool
+source files were modified; helper scripts are scoped to this backup directory.
+
+Flashed ota_0 through Flipper in 76 separately verified 16 KB write blocks,
+retrying interrupted blocks. A final complete-image digest comparison passed,
+and a separate digest check confirmed that the first 64 KB (bootloader,
+partition table, OTA selector, NVS and PHY settings) remained unchanged.
+Original backups passed SHA256 checks. No whole-chip erase, bootloader rewrite,
+partition-table change or eFuse write. The backup directory is private and
+contains recovery files; do not publish it or store its raw data in Obsidian.
+
+The post-flash UART capture still showed DOWNLOAD boot mode, so the new
+application has not been observed running. Power off, remove the C6 IO9-GND
+jumper, release the P4 BOOT button and power on normally before runtime testing.
+The installed P4 host is still pinned to Hosted 2.12.8; this operation changed
+only C6 to the verified v2.12.13 prebuilt. Protocol identity is source evidence,
+not established host/companion runtime compatibility or peer delivery. No
+source dependency versions were changed in this flash task; no commit or push.
+
+Subsequent user runtime confirmation on October 11, 2026: "now works,
+heartbeat sent." This records user-confirmed heartbeat sending after the C6
+flash with the installed P4 Hosted 2.12.8 and C6 ESPHome v2.12.13 companion.
+No additional P4 dependency upgrade was performed. The agent did not capture
+this runtime event or receiving-peer logs; sustained transmission, receive
+behavior and peer delivery remain unverified.
 
 ### ESP32 packet activity LED
 
@@ -582,7 +817,7 @@ The branch contains the cumulative node-bootstrap implementation relative to `ma
 
 ## Merge Readiness
 
-The receive boundary ends after VaydeEngine dequeues one packet, validates version, type, TTL, length, and CRC, decodes supported prototype type `1` into a `Message`, and dispatches it through `MessageSink`. The engine transmit boundary accepts a broadcast `TransmitRequest`, encodes it with node identity and an engine-owned sequence, submits it through the adapter, and maps asynchronous completion through bootstrap forwarding. The node application now invokes that boundary periodically for a heartbeat. The historical paired receiver logs prove adapter transmission and peer delivery for the earlier one-shot startup broadcast; the later user-reported hardware test confirms bidirectional TX/RX for that earlier firmware. Repeated heartbeat transmission and peer delivery have not yet been observed on hardware. This does not claim archived paired sender/receiver traces for both directions, broader application orchestration, message retention, authentication, routing, relay behavior, production provisioning, or finalized cross-transport serialization.
+The receive boundary ends after VaydeEngine dequeues one packet, validates version, type, TTL, length, and CRC, decodes supported prototype type `1` into a `Message`, and dispatches it through `MessageSink`. The engine transmit boundary accepts a broadcast `TransmitRequest`, encodes it with node identity and an engine-owned sequence, submits it through the adapter, and maps asynchronous completion through bootstrap forwarding. The node application now invokes that boundary periodically for a heartbeat. The historical paired receiver logs prove adapter transmission and peer delivery for the earlier one-shot startup broadcast; the later user-reported hardware test confirms bidirectional TX/RX for that earlier firmware. On October 11, 2026, the user confirmed heartbeat sending on the P4+C6 setup after flashing the ESP-NOW companion. Sustained repeated heartbeat transmission and receiving-peer delivery for that setup remain unverified. This does not claim archived paired sender/receiver traces for both directions, broader application orchestration, message retention, authentication, routing, relay behavior, production provisioning, or finalized cross-transport serialization.
 
 ## Implemented Checkpoint: Decode and Dispatch Validated Packets
 
