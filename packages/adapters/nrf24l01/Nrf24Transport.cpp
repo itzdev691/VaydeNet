@@ -1,5 +1,7 @@
 #include "Nrf24Transport.h"
+#include "Nrf24Packet.h"
 #include "driver/gpio.h"
+#include "esp_rom_sys.h"
 
 #define CE_PIN   GPIO_NUM_5
 #define CSN_PIN  GPIO_NUM_4
@@ -59,42 +61,89 @@ TransportStatus Nrf24Transport::initialize() {
     constexpr uint8_t RF_CH = 0x05;
     constexpr uint8_t channel = 76;
 
-const uint8_t write_bytes[2] = {
-    0x20 | RF_CH, // Write-register command + register address
-    channel      // Value to store
-};
+    const uint8_t write_bytes[2] = {
+        0x20 | RF_CH, // Write-register command + register address
+        channel      // Value to store
+    };
 
-spi_transaction_t write_transaction{};
-write_transaction.length = 16; // Two bytes, measured in bits
-write_transaction.tx_buffer = write_bytes;
+    spi_transaction_t write_transaction{};
+    write_transaction.length = 16; // Two bytes, measured in bits
+    write_transaction.tx_buffer = write_bytes;
 
-if (spi_device_transmit(spi_device_, &write_transaction) != ESP_OK) {
-    return TransportStatus::InitializationFailed;
-}
-const uint8_t read_bytes[2] = {
-    RF_CH, // Read-register command is 0x00 + register address
-    0xFF   // Dummy byte supplies clock pulses for the response
-};
+    if (spi_device_transmit(spi_device_, &write_transaction) != ESP_OK) {
+        return TransportStatus::InitializationFailed;
+    }
+    const uint8_t read_bytes[2] = {
+        RF_CH, // Read-register command is 0x00 + register address
+        0xFF   // Dummy byte supplies clock pulses for the response
+    };
 
-uint8_t response[2]{};
+    uint8_t response[2]{};
 
-spi_transaction_t read_transaction{};
-read_transaction.length = 16;
-read_transaction.rxlength = 16;
-read_transaction.tx_buffer = read_bytes;
-read_transaction.rx_buffer = response;
+    spi_transaction_t read_transaction{};
+    read_transaction.length = 16;
+    read_transaction.rxlength = 16;
+    read_transaction.tx_buffer = read_bytes;
+    read_transaction.rx_buffer = response;
 
-if (spi_device_transmit(spi_device_, &read_transaction) != ESP_OK) {
-    return TransportStatus::InitializationFailed;
-}
+    if (spi_device_transmit(spi_device_, &read_transaction) != ESP_OK) {
+        return TransportStatus::InitializationFailed;
+    }
 
-const uint8_t actual_channel = response[1];
+    const uint8_t actual_channel = response[1];
 
-if (actual_channel != channel) {
-    return TransportStatus::InitializationFailed;
-}
+    if (actual_channel != channel) {
+        return TransportStatus::InitializationFailed;
+    }
 
-    // TODO: Verify and configure the radio before reporting transport readiness.
+    constexpr uint8_t CONFIG = 0x00;
+    constexpr uint8_t EN_CRC = 1U << 3;
+    constexpr uint8_t CRCO = 1U << 2;
+    constexpr uint8_t PWR_UP = 1U << 1;
+    // Two-byte radio CRC, powered up, PRIM_RX cleared. CE stays low for standby.
+    constexpr uint8_t config = EN_CRC | CRCO | PWR_UP;
+
+    const uint8_t config_write_bytes[2] = {0x20 | CONFIG, config};
+    spi_transaction_t config_write_transaction{};
+    config_write_transaction.length = 16;
+    config_write_transaction.tx_buffer = config_write_bytes;
+
+    if (spi_device_transmit(spi_device_, &config_write_transaction) != ESP_OK) {
+        return TransportStatus::InitializationFailed;
+    }
+
+    // Allow the internal crystal to settle after PWR_UP before further startup.
+    esp_rom_delay_us(1500);
+
+    const uint8_t config_read_bytes[2] = {CONFIG, 0xFF};
+    uint8_t config_response[2]{};
+    spi_transaction_t config_read_transaction{};
+    config_read_transaction.length = 16;
+    config_read_transaction.rxlength = 16;
+    config_read_transaction.tx_buffer = config_read_bytes;
+    config_read_transaction.rx_buffer = config_response;
+
+    if (spi_device_transmit(spi_device_, &config_read_transaction) != ESP_OK ||
+        config_response[1] != config) {
+        return TransportStatus::InitializationFailed;
+    }
+    constexpr uint8_t TX_ADDR = 0x10;
+
+    // Example address, in SPI transfer order.
+    const uint8_t bytes[6] = {
+        0x20 | TX_ADDR,
+        0xD2, 0xF0, 0xF0, 0xF0, 0xF0
+    };
+
+    spi_transaction_t transaction{};
+    transaction.length = sizeof(bytes) * 8;
+    transaction.tx_buffer = bytes;
+
+    if (spi_device_transmit(spi_device_, &transaction) != ESP_OK) {
+        return TransportStatus::InitializationFailed;
+    }
+
+    // TODO: Complete address setup, FIFOs and RX/TX before reporting readiness.
     return TransportStatus::InitializationFailed;
 }
 
