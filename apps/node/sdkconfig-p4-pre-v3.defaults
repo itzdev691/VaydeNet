@@ -1,0 +1,3 @@
+# Must match PlatformIO's esp32p4_es chip variant (pre-v3 engineering samples).
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
+CONFIG_ESP32P4_REV_MIN_1=y

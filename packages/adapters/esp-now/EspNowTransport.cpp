@@ -10,6 +10,10 @@
 #include "esp_wifi.h"
 #include "nvs_flash.h"
 
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+#include "esp_hosted.h"
+#endif
+
 namespace {
 
 constexpr UBaseType_t kTransmitCompletionQueueDepth = 1;
@@ -160,24 +164,53 @@ TransportStatus EspNowTransport::initialize() {
         return TransportStatus::InitializationFailed;
     }
 
+    // On P4, the remote Wi-Fi API needs Hosted's transport and RPC setup first.
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+    ESP_LOGI(kLogTag, "P4 startup: esp_hosted_init");
+    const esp_err_t hosted_status = esp_hosted_init();
+    if (hosted_status != ESP_OK) {
+        ESP_LOGE(
+            kLogTag,
+            "ESP-Hosted initialization failed: %s",
+            esp_err_to_name(hosted_status)
+        );
+        return TransportStatus::InitializationFailed;
+    }
+#endif
+
     wifi_init_config_t wifi_configuration = WIFI_INIT_CONFIG_DEFAULT();
 
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+    ESP_LOGI(kLogTag, "P4 startup: esp_wifi_init (C6 connection)");
+#endif
     if (esp_wifi_init(&wifi_configuration) != ESP_OK) {
         return TransportStatus::InitializationFailed;
     }
 
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+    ESP_LOGI(kLogTag, "P4 startup: esp_wifi_set_storage");
+#endif
     if (esp_wifi_set_storage(WIFI_STORAGE_RAM) != ESP_OK) {
         return TransportStatus::InitializationFailed;
     }
 
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+    ESP_LOGI(kLogTag, "P4 startup: esp_wifi_set_mode");
+#endif
     if (esp_wifi_set_mode(WIFI_MODE_STA) != ESP_OK) {
         return TransportStatus::InitializationFailed;
     }
 
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+    ESP_LOGI(kLogTag, "P4 startup: esp_wifi_start");
+#endif
     if (esp_wifi_start() != ESP_OK) {
         return TransportStatus::InitializationFailed;
     }
 
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+    ESP_LOGI(kLogTag, "P4 startup: esp_wifi_set_channel");
+#endif
     if (
         esp_wifi_set_channel(
             channel_,
@@ -187,9 +220,16 @@ TransportStatus EspNowTransport::initialize() {
         return TransportStatus::InitializationFailed;
     }
 
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+    ESP_LOGI(kLogTag, "P4 startup: esp_now_init (C6 ESP-NOW overlay)");
+#endif
     if (esp_now_init() != ESP_OK) {
         return TransportStatus::InitializationFailed;
     }
+
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+    ESP_LOGI(kLogTag, "P4 startup: esp_now_init completed");
+#endif
 
     if (active_instance_ != nullptr && active_instance_ != this) {
         (void)esp_now_deinit();

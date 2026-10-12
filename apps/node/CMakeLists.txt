@@ -5,6 +5,7 @@ list(APPEND EXTRA_COMPONENT_DIRS
     "${CMAKE_CURRENT_LIST_DIR}/../../packages/VaydeEngine"
     "${CMAKE_CURRENT_LIST_DIR}/../../packages/platforms/esp32"
     "${CMAKE_CURRENT_LIST_DIR}/../../packages/adapters/esp-now"
+    "${CMAKE_CURRENT_LIST_DIR}/../../packages/adapters/esp-now-hosted"
     "${CMAKE_CURRENT_LIST_DIR}/../../packages/adapters/nrf24l01"
 )
 

@@ -1,2 +1,12 @@
 dependencies:
   espressif/led_strip: "^2.5.5"
+  # ESP32-P4 uses an external wireless coprocessor, including an onboard C6.
+  espressif/esp_hosted:
+    version: "2.12.8"
+    rules:
+      - if: "target == esp32p4"
+  espressif/esp_wifi_remote:
+    version: "1.6.5"
+    require: public
+    rules:
+      - if: "target == esp32p4"
