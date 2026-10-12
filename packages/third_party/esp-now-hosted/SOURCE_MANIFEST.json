@@ -1,0 +1,82 @@
+{
+  "downloaded_on": "2026-10-11",
+  "upstream_revisions": {
+    "esphome/esphome": "254690100c4768e592017c47550fbf8dbcce69ef",
+    "esphome/esp-hosted-firmware": "e4c39e0187db8fb6f9921cf8fa875463a792ce7f"
+  },
+  "protocol_headers_identical": true,
+  "files": [
+    {
+      "path": "host/esp_now_hosted.cpp",
+      "url": "https://raw.githubusercontent.com/esphome/esphome/254690100c4768e592017c47550fbf8dbcce69ef/esphome/components/esp32_hosted/esp_now_hosted.cpp",
+      "sha256": "a06fd9e9f0885458433483fa82b1eddf033e4558439751d3ec40246c116119c1",
+      "bytes": 19845
+    },
+    {
+      "path": "host/esp_now_hosted_rpc.h",
+      "url": "https://raw.githubusercontent.com/esphome/esphome/254690100c4768e592017c47550fbf8dbcce69ef/esphome/components/esp32_hosted/esp_now_hosted_rpc.h",
+      "sha256": "6a4bf7ae01ae59e66c1a754cd516124098ed983cc675024fb78749b87d4d0cd3",
+      "bytes": 6483
+    },
+    {
+      "path": "licenses/esphome.LICENSE",
+      "url": "https://raw.githubusercontent.com/esphome/esphome/254690100c4768e592017c47550fbf8dbcce69ef/LICENSE",
+      "sha256": "1f312390122725ee382f85af00e3df84f2490cd8fa61b9ea172bc6591cc0ac63",
+      "bytes": 36664
+    },
+    {
+      "path": "slave-overlay/CMakeLists.txt",
+      "url": "https://raw.githubusercontent.com/esphome/esp-hosted-firmware/e4c39e0187db8fb6f9921cf8fa875463a792ce7f/slave-overlay/CMakeLists.txt",
+      "sha256": "16ff49342594e95b3ac024203dcb10765328810335f48d9edfabe7d524bb6d8d",
+      "bytes": 502
+    },
+    {
+      "path": "slave-overlay/Kconfig",
+      "url": "https://raw.githubusercontent.com/esphome/esp-hosted-firmware/e4c39e0187db8fb6f9921cf8fa875463a792ce7f/slave-overlay/Kconfig",
+      "sha256": "51a0344894cf7fecaa7e9c91b4754477053668c7bb91aeabcc0f7f5479dacdd9",
+      "bytes": 309
+    },
+    {
+      "path": "slave-overlay/README.md",
+      "url": "https://raw.githubusercontent.com/esphome/esp-hosted-firmware/e4c39e0187db8fb6f9921cf8fa875463a792ce7f/slave-overlay/README.md",
+      "sha256": "1e6732ce7706081c37eceb735196eb61dd2fca7bf1216a3f05d8091a8c573116",
+      "bytes": 4163
+    },
+    {
+      "path": "slave-overlay/esp_now_hosted_rpc.h",
+      "url": "https://raw.githubusercontent.com/esphome/esp-hosted-firmware/e4c39e0187db8fb6f9921cf8fa875463a792ce7f/slave-overlay/esp_now_hosted_rpc.h",
+      "sha256": "6a4bf7ae01ae59e66c1a754cd516124098ed983cc675024fb78749b87d4d0cd3",
+      "bytes": 6483
+    },
+    {
+      "path": "slave-overlay/esp_now_hosted_slave.c",
+      "url": "https://raw.githubusercontent.com/esphome/esp-hosted-firmware/e4c39e0187db8fb6f9921cf8fa875463a792ce7f/slave-overlay/esp_now_hosted_slave.c",
+      "sha256": "8d08968db8df274aeeabf68365458783cbb3cf06159dcb1b5f904b4e46ec3ae4",
+      "bytes": 9434
+    },
+    {
+      "path": "slave-overlay/esp_now_hosted_slave.h",
+      "url": "https://raw.githubusercontent.com/esphome/esp-hosted-firmware/e4c39e0187db8fb6f9921cf8fa875463a792ce7f/slave-overlay/esp_now_hosted_slave.h",
+      "sha256": "800a6cc682d6fb3f40471232bfcfdc8a548d4d88ae8eac17272a6925af12b035",
+      "bytes": 976
+    },
+    {
+      "path": "apply-overlay.sh",
+      "url": "https://raw.githubusercontent.com/esphome/esp-hosted-firmware/e4c39e0187db8fb6f9921cf8fa875463a792ce7f/apply-overlay.sh",
+      "sha256": "3764e92972f56cfa353500fac6b1e73d6f8651bcb248bd8119d3e01e4cfe1b0d",
+      "bytes": 6019
+    },
+    {
+      "path": "UPSTREAM_README.md",
+      "url": "https://raw.githubusercontent.com/esphome/esp-hosted-firmware/e4c39e0187db8fb6f9921cf8fa875463a792ce7f/README.md",
+      "sha256": "1e1d7729198debfeba183142c66cf16e066204ce1b9f3a29aa762dbc7c159cd8",
+      "bytes": 5201
+    },
+    {
+      "path": "licenses/esp-hosted-firmware.LICENSE",
+      "url": "https://raw.githubusercontent.com/esphome/esp-hosted-firmware/e4c39e0187db8fb6f9921cf8fa875463a792ce7f/LICENSE",
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+      "bytes": 11357
+    }
+  ]
+}
