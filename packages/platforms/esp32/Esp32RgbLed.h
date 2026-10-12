@@ -8,6 +8,7 @@
 
 class Esp32RgbLed {
 public:
+    // GPIO -1 disables the indicator and returns false without touching hardware.
     bool initialize(int gpio_number);
     void flash();
 

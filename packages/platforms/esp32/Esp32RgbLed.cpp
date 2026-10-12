@@ -38,6 +38,11 @@ bool Esp32RgbLed::initialize(int gpio_number) {
         return true;
     }
 
+    if (gpio_number == -1) {
+        ESP_LOGI(kLogTag, "Packet activity LED disabled");
+        return false;
+    }
+
 #if defined(VAYDENET_ACTIVITY_LED_ACTIVE_LOW_GPIO) || \
     defined(VAYDENET_ACTIVITY_LED_ACTIVE_HIGH_GPIO)
     gpio_number_ = gpio_number;
