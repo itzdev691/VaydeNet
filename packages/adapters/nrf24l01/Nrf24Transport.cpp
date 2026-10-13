@@ -3,6 +3,8 @@
 #include "driver/gpio.h"
 #include "esp_rom_sys.h"
 
+#include <cstring>
+
 #define CE_PIN   GPIO_NUM_5
 #define CSN_PIN  GPIO_NUM_4
 #define MOSI_PIN GPIO_NUM_1
@@ -14,6 +16,36 @@ Nrf24Transport::~Nrf24Transport() {
         (void)spi_bus_remove_device(spi_device_);
         (void)spi_bus_free(SPI2_HOST);
     }
+}
+
+esp_err_t Nrf24Transport::readRegister(uint8_t reg, uint8_t* data, std::size_t length) {
+    constexpr std::size_t max_register_bytes = 5;
+    if (data == nullptr || length == 0 || length > max_register_bytes || reg > 0x1F) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (spi_device_ == nullptr) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    uint8_t request[1 + max_register_bytes]{};
+    uint8_t response[1 + max_register_bytes]{};
+    request[0] = reg; // R_REGISTER (0x00) | register address.
+    std::memset(request + 1, 0xFF, length); // Dummy bytes clock out register data.
+
+    spi_transaction_t transaction{};
+    transaction.length = (1 + length) * 8;
+    transaction.rxlength = transaction.length;
+    transaction.tx_buffer = request;
+    transaction.rx_buffer = response;
+
+    const esp_err_t result = spi_device_transmit(spi_device_, &transaction);
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    // response[0] is STATUS; the remaining bytes contain the register value.
+    std::memcpy(data, response + 1, length);
+    return ESP_OK;
 }
 
 TransportStatus Nrf24Transport::initialize() {
@@ -73,26 +105,9 @@ TransportStatus Nrf24Transport::initialize() {
     if (spi_device_transmit(spi_device_, &write_transaction) != ESP_OK) {
         return TransportStatus::InitializationFailed;
     }
-    const uint8_t read_bytes[2] = {
-        RF_CH, // Read-register command is 0x00 + register address
-        0xFF   // Dummy byte supplies clock pulses for the response
-    };
-
-    uint8_t response[2]{};
-
-    spi_transaction_t read_transaction{};
-    read_transaction.length = 16;
-    read_transaction.rxlength = 16;
-    read_transaction.tx_buffer = read_bytes;
-    read_transaction.rx_buffer = response;
-
-    if (spi_device_transmit(spi_device_, &read_transaction) != ESP_OK) {
-        return TransportStatus::InitializationFailed;
-    }
-
-    const uint8_t actual_channel = response[1];
-
-    if (actual_channel != channel) {
+    uint8_t actual_channel{};
+    if (readRegister(RF_CH, &actual_channel, sizeof(actual_channel)) != ESP_OK ||
+        actual_channel != channel) {
         return TransportStatus::InitializationFailed;
     }
 
@@ -115,16 +130,9 @@ TransportStatus Nrf24Transport::initialize() {
     // Allow the internal crystal to settle after PWR_UP before further startup.
     esp_rom_delay_us(1500);
 
-    const uint8_t config_read_bytes[2] = {CONFIG, 0xFF};
-    uint8_t config_response[2]{};
-    spi_transaction_t config_read_transaction{};
-    config_read_transaction.length = 16;
-    config_read_transaction.rxlength = 16;
-    config_read_transaction.tx_buffer = config_read_bytes;
-    config_read_transaction.rx_buffer = config_response;
-
-    if (spi_device_transmit(spi_device_, &config_read_transaction) != ESP_OK ||
-        config_response[1] != config) {
+    uint8_t actual_config{};
+    if (readRegister(CONFIG, &actual_config, sizeof(actual_config)) != ESP_OK ||
+        actual_config != config) {
         return TransportStatus::InitializationFailed;
     }
     constexpr uint8_t TX_ADDR = 0x10;
@@ -140,6 +148,12 @@ TransportStatus Nrf24Transport::initialize() {
     transaction.tx_buffer = bytes;
 
     if (spi_device_transmit(spi_device_, &transaction) != ESP_OK) {
+        return TransportStatus::InitializationFailed;
+    }
+
+    uint8_t actual_address[5]{};
+    if (readRegister(TX_ADDR, actual_address, sizeof(actual_address)) != ESP_OK ||
+        std::memcmp(actual_address, bytes + 1, sizeof(actual_address)) != 0) {
         return TransportStatus::InitializationFailed;
     }
 

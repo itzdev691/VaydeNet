@@ -1,5 +1,8 @@
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
+
 #include "driver/spi_master.h"
 #include "VaydeNet/transport/TransportInterface.h"
 
@@ -18,5 +21,8 @@ public:
     TransportTransmitCompletionStatus pollTransmitCompletion() override;
 
 private:
+    // Read 1-5 register bytes in SPI transfer order, excluding the STATUS byte.
+    esp_err_t readRegister(uint8_t reg, uint8_t* data, std::size_t length);
+
     spi_device_handle_t spi_device_{nullptr};
 };
