@@ -1,42 +1,104 @@
 # VaydeNet Development Status
 
-Snapshot: October 4, 2026
+Snapshot: October 14, 2026
 
-Target bootstrap-branch completion: September 18, 2026
+## Current source checkpoint
 
-VaydeNet is being developed as a hardware-independent communication framework for embedded systems. The intended application boundary remains independent of ESP-NOW, nRF24L01, LoRa, Bluetooth, Wi-Fi, Ethernet, and future transports.
+Reviewed `/Volumes/ExtVault/VaydeNet` on `feat/nrf24-adapter-scaffold` at
+`24b5708`. The working tree was clean before this documentation update and
+matched its upstream. After fetching, `origin/main` was `212ad8d`; the feature
+branch was zero commits behind and 18 ahead. These counts describe Git ancestry,
+not the number of unique changes: main includes squash-merged feature work.
+No merge or whole-branch merge-readiness assessment was performed in this review.
 
-The active implementation checkpoint is the ESP32 node bootstrap. It can retrieve hardware identity, read a minimal configuration from NVS, select ESP-NOW, initialize a board-specific packet activity LED, apply the configured Wi-Fi channel, initialize ESP-NOW, register a receive callback, log incoming frame metadata, request an LED flash for each exact-sized `Packet` frame, copy that frame into a bounded four-slot FreeRTOS queue, construct an `EngineStartupContext`, hand the initialized dependencies to `VaydeEngine::start()`, and report a specific startup result. After successful startup, the FreeRTOS-backed application loop asks VaydeEngine to process one queued frame and poll any pending transmit completion every 10 ms. It also submits an immediate type-1 broadcast heartbeat with payload `Node is alive` and repeats the attempt every five seconds while no earlier transmission is pending. VaydeEngine validates received frames, decodes supported prototype type `1` into a transport-independent `Message`, and dispatches it through a portable `MessageSink`. The current node sink logs logical-message metadata but does not retain, route, relay, or acknowledge the message.
+VaydeNet currently provides a portable C++17 engine with an ESP-NOW prototype
+node. The engine validates the packed 220-byte `Packet`, decodes supported type
+`1` to `MessageSink`, and encodes broadcast requests with sender identity,
+sequence and CRC. `packages/node` owns ESP32 startup, NVS settings and transport
+wiring. `apps/node` owns the logging sink and serialized 10 ms processing loop,
+with an immediate heartbeat and subsequent attempts every five seconds.
 
-## Current source checkpoint - October 4, 2026
+| Area | Current source boundary |
+| --- | --- |
+| Portable engine | Version/length/type/TTL/CRC validation, type-1 decode/encode, broadcast submission and completion mapping. No routing, authentication, replay protection or persistent inbox. |
+| ESP-NOW node | Four-slot receive queue, one pending broadcast transmission, callback completion queue. Bootstrap selects ESP-NOW; Nrf24/Ethernet settings return `UnsupportedTransport`. |
+| MicroPython | Native `_vaydenet` reuses the engine; Python owns Wi-Fi/ESP-NOW. One serialized session. Included in committed history; dated “uncommitted” records below are historical. |
+| WT32 | Arduino Ethernet monitoring/dashboard and a four-entry telemetry queue feeding VaydeEngine then ESP-NOW. It does not use `packages/node` or supply a reusable Ethernet adapter. |
+| P4+C6 | P4 host bridge and board defaults are committed. Host dependencies pin ESP-Hosted 2.12.8 and Wi-Fi Remote 1.6.5. October 11 user-confirmed heartbeat sending remains historical transmission evidence, without paired receiver capture. |
+| nRF24 | Registered ESP-IDF component; SPI register-configuration scaffold only. No application constructs it. RX/TX/completion remain `NotInitialized` stubs. |
 
-The shared-node extraction and MicroPython integration are on
-`feat/shared-node-micropython`. The preceding WT32 refactor was merged through
-PR #20; this branch's starting committed tree matches main's `cc56e18` snapshot.
-The shared node component accepts an application-owned `MessageSink`, while
-MicroPython owns its separate Wi-Fi/ESP-NOW session and uses the native engine
-through bindings. Both preserve VaydeEngine's packet validation and encoding boundary.
+### nRF24 register checkpoint
 
-The MicroPython heartbeat example now catches radio `OSError` without stopping
-receive polling or GPIO pulse expiry. Native status results use interned strings
-to prevent allocation failure from stranding an already queued transmission.
-The new heap-lock and example-loop regressions pass, as do both existing
-MicroPython suites against a freshly rebuilt native unix interpreter and all
-seven sanitizer-backed C++ host tests. The example uses selectable SH1106/SSD1306
-drivers and a nonblocking 500 ms receive pulse on GPIO 24.
+`packages/adapters/nrf24l01/Nrf24Transport.cpp` configures SPI2, mode 0 at 1 MHz,
+with CE=5, CSN=4, MOSI=1, MISO=6 and SCK=7. Its bounded `readRegister()` helper
+reads 1–5 bytes after the STATUS byte. Initialization writes and verifies RF_CH
+76, CONFIG `0x0E` after a 1,500 us wait, SETUP_AW `0x03`, TX_ADDR
+`D2 F0 F0 F0 F0`, and matching RX_ADDR_P0. CE remains low. Even matching all
+register checks deliberately returns `InitializationFailed`.
 
-The updated native module also compiled and linked for `ESP32_GENERIC_C5`
-under ESP-IDF 5.5.4. Its application image is 1,939,616 bytes, with 92,000 bytes
-left in the application partition. This rebuild followed restoration of missing
-toolchain references in the external temporary build directory. The repository's
-saved combined image remains the September 30 artifact and predates the status
-allocation fix; it was not replaced or flashed.
+Commit `7856bae` added the shared read helper/TX address verification;
+`24b5708` added address-width and pipe-0 address verification. The separate
+`Nrf24Packet.h` has a 32-byte size assertion and 12-byte payload, but no codec or
+engine integration. `TransportInterface` still exchanges the 220-byte `Packet`.
+Pipe enablement, ACK/retry/payload configuration, FIFO startup and actual RX/TX
+remain unfinished. This source is not evidence of physical register responses
+or RF operation.
 
-The incidental `apps/node/dependencies.lock` target change was restored to the
-tracked ESP32-S2 snapshot and excluded from this feature commit. The existing CI workflow
-does not run the MicroPython suites or build this custom interpreter. The dated
-build and hardware entries below retain their original evidence boundaries;
-these new host checks do not establish new device runtime or peer delivery.
+### Review gaps
+
+- Resolve the 220-byte engine transport contract versus the proposed 32-byte
+  nRF24 frame before implementing message delivery; serialization and optional
+  fragmentation/reassembly remain design work.
+- Expand automated coverage beyond the seven C++ host executables and four
+  node CI targets. CI omits MicroPython suites, WT32, DOIT and both P4 variants;
+  it runs on main pushes, PRs to main and manual dispatch, not feature pushes.
+- Test ESP-NOW initialization failure/retry and shutdown/restart ownership.
+  Initialization creates the default event loop; shutdown does not release
+  Wi-Fi/event-loop resources. The host mock always succeeds at event-loop
+  creation, so the passing suite does not establish retry behavior.
+- Verify NVS missing/corrupt/unsupported settings and write/read failures;
+  automatic channel-1 development defaults remain outside a production
+  provisioning contract. The full `NodeSettings` schema is not persisted.
+- Command dispatch, retained inbox, authentication and custom receiver notes
+  remain plans. Source encoding/decoding currently supports type `1` only.
+
+### Verification performed October 14, 2026
+
+- Source: engine validation/encoding/decoding, ESP-NOW adapter, node/bootstrap
+  and settings, MicroPython adapter/build documentation, WT32 integration
+  documentation, nRF24 adapter and CI configuration reviewed.
+- Tests: all seven executables in `bash tests/run_host_tests.sh` passed with
+  AddressSanitizer/UndefinedBehaviorSanitizer enabled. The CPython
+  `tests/micropython/example_loop_test.py` regression also passed.
+- Build: no new firmware build or native MicroPython interpreter build;
+  the native integration/heap-lock suites were not rerun. Historical results
+  below retain their original dates and source/device boundaries.
+- Flash/runtime/peer/deployment: no new device or deployment verification.
+- Documentation: current summary reconciled with source; historical records
+  retained below. No firmware source or dependency-lock changes in this update.
+
+## Historical implementation and verification records
+
+The sections below preserve earlier checkpoints. Branch names, “current,”
+“uncommitted,” readiness statements, images and device results apply to their
+stated dates; use the October 14 summary above for the present source boundary.
+
+## MicroPython regression checkpoint — October 4, 2026
+
+The MicroPython heartbeat example catches radio `OSError` while continuing
+receive polling and GPIO pulse expiry. Native statuses use interned strings
+to avoid allocating after a transmission is queued. A freshly rebuilt native
+unix interpreter passed both integration suites and the heap-lock regression;
+the CPython example-loop regression and all seven C++ host tests also passed.
+
+The updated native module compiled and linked for `ESP32_GENERIC_C5` under
+ESP-IDF 5.5.4: application image 1,939,616 bytes, with 92,000 bytes remaining
+in its partition. Missing toolchain references in the external temporary build
+directory were restored for that rebuild. The saved combined firmware remained
+the September 30 artifact, predating the allocation fix; it was not replaced
+or flashed. The build-generated target change in `apps/node/dependencies.lock`
+was restored to the tracked ESP32-S2 snapshot. These were host/build results,
+without new device runtime or peer-delivery evidence.
 
 ## Shared node structure
 
