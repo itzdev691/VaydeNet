@@ -135,6 +135,30 @@ TransportStatus Nrf24Transport::initialize() {
         actual_config != config) {
         return TransportStatus::InitializationFailed;
     }
+
+    // Set and verify the five-byte address width before writing radio addresses.
+    constexpr uint8_t SETUP_AW = 0x03;      // Register address.
+    constexpr uint8_t address_width = 0x03; // Five-byte address encoding.
+
+    const uint8_t width_bytes[2] = {
+        0x20 | SETUP_AW,
+        address_width
+    };
+
+    spi_transaction_t width_transaction{};
+    width_transaction.length = sizeof(width_bytes) * 8;
+    width_transaction.tx_buffer = width_bytes;
+
+    if (spi_device_transmit(spi_device_, &width_transaction) != ESP_OK) {
+        return TransportStatus::InitializationFailed;
+    }
+
+    uint8_t actual_width{};
+    if (readRegister(SETUP_AW, &actual_width, sizeof(actual_width)) != ESP_OK ||
+        actual_width != address_width) {
+        return TransportStatus::InitializationFailed;
+    }
+
     constexpr uint8_t TX_ADDR = 0x10;
 
     // Example address, in SPI transfer order.
@@ -157,7 +181,32 @@ TransportStatus Nrf24Transport::initialize() {
         return TransportStatus::InitializationFailed;
     }
 
-    // TODO: Complete address setup, FIFOs and RX/TX before reporting readiness.
+    constexpr uint8_t RX_ADDR_P0 = 0x0A;
+
+    // Copy the existing TX address, excluding its SPI command byte.
+    uint8_t rx_address_bytes[6]{};
+    rx_address_bytes[0] = 0x20 | RX_ADDR_P0;
+    std::memcpy(rx_address_bytes + 1, bytes + 1, sizeof(actual_address));
+
+    spi_transaction_t rx_address_transaction{};
+    rx_address_transaction.length = sizeof(rx_address_bytes) * 8;
+    rx_address_transaction.tx_buffer = rx_address_bytes;
+
+    if (spi_device_transmit(spi_device_, &rx_address_transaction) != ESP_OK) {
+        return TransportStatus::InitializationFailed;
+    }
+
+    uint8_t actual_rx_address[5]{};
+    if (readRegister(RX_ADDR_P0,
+                     actual_rx_address,
+                     sizeof(actual_rx_address)) != ESP_OK ||
+        std::memcmp(actual_rx_address,
+                    rx_address_bytes + 1,
+                    sizeof(actual_rx_address)) != 0) {
+        return TransportStatus::InitializationFailed;
+    }
+
+    // TODO: Configure RX pipes, ACKs, payloads, FIFOs and RX/TX before reporting readiness.
     return TransportStatus::InitializationFailed;
 }
 
