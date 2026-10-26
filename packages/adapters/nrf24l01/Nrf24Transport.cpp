@@ -2,6 +2,9 @@
 #include "Nrf24Packet.h"
 #include "driver/gpio.h"
 #include "esp_rom_sys.h"
+#include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 #include <cstring>
 
@@ -11,8 +14,17 @@
 #define MISO_PIN GPIO_NUM_6
 #define SCK_PIN  GPIO_NUM_7
 
+namespace {
+constexpr char tag[] = "Nrf24Transport";
+constexpr uint8_t CONFIG = 0x00;
+constexpr uint8_t STATUS = 0x07;
+constexpr uint8_t FIFO_STATUS = 0x17;
+constexpr uint8_t irq_flags = 0x70;
+}
+
 Nrf24Transport::~Nrf24Transport() {
     if (spi_device_ != nullptr) {
+        (void)gpio_set_level(CE_PIN, 0);
         (void)spi_bus_remove_device(spi_device_);
         (void)spi_bus_free(SPI2_HOST);
     }
@@ -39,6 +51,7 @@ esp_err_t Nrf24Transport::readRegister(uint8_t reg, uint8_t* data, std::size_t l
     transaction.rx_buffer = response;
 
     const esp_err_t result = spi_device_transmit(spi_device_, &transaction);
+    esp_rom_delay_us(4); // Conservative CSN-high spacing between commands.
     if (result != ESP_OK) {
         return result;
     }
@@ -46,6 +59,55 @@ esp_err_t Nrf24Transport::readRegister(uint8_t reg, uint8_t* data, std::size_t l
     // response[0] is STATUS; the remaining bytes contain the register value.
     std::memcpy(data, response + 1, length);
     return ESP_OK;
+}
+
+esp_err_t Nrf24Transport::writeRegister(uint8_t reg, const uint8_t* data,
+                                     std::size_t length) {
+    if (data == nullptr || length == 0 || length > 5 || reg > 0x1F) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (spi_device_ == nullptr) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    uint8_t request[6]{};
+    request[0] = 0x20 | reg;
+    std::memcpy(request + 1, data, length);
+    spi_transaction_t transaction{};
+    transaction.length = (1 + length) * 8;
+    transaction.tx_buffer = request;
+    const esp_err_t result = spi_device_transmit(spi_device_, &transaction);
+    esp_rom_delay_us(4);
+    return result;
+}
+
+bool Nrf24Transport::writeAndVerify(uint8_t reg, const uint8_t* data,
+                                   std::size_t length) {
+    uint8_t actual[5]{};
+    if (writeRegister(reg, data, length) != ESP_OK ||
+        readRegister(reg, actual, length) != ESP_OK) {
+        ESP_LOGW(tag, "Register 0x%02x SPI transfer failed", reg);
+        return false;
+    }
+    for (std::size_t i = 0; i < length; ++i) {
+        if (actual[i] != data[i]) {
+            ESP_LOGW(tag, "Register 0x%02x byte %u: expected 0x%02x, read 0x%02x",
+                     reg, static_cast<unsigned>(i), data[i], actual[i]);
+            return false;
+        }
+    }
+    return true;
+}
+
+esp_err_t Nrf24Transport::sendCommand(uint8_t command) {
+    if (spi_device_ == nullptr) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    spi_transaction_t transaction{};
+    transaction.length = 8;
+    transaction.tx_buffer = &command;
+    const esp_err_t result = spi_device_transmit(spi_device_, &transaction);
+    esp_rom_delay_us(4);
+    return result;
 }
 
 TransportStatus Nrf24Transport::initialize() {
@@ -60,6 +122,7 @@ TransportStatus Nrf24Transport::initialize() {
             gpio_set_level(CE_PIN, 0) != ESP_OK ||
             gpio_set_level(CSN_PIN, 1) != ESP_OK
         ) {
+            ESP_LOGW(tag, "GPIO setup failed");
             return TransportStatus::InitializationFailed;
         }
 
@@ -75,6 +138,7 @@ TransportStatus Nrf24Transport::initialize() {
         bus_config.data7_io_num = -1;
 
         if (spi_bus_initialize(SPI2_HOST, &bus_config, SPI_DMA_DISABLED) != ESP_OK) {
+            ESP_LOGW(tag, "SPI bus initialization failed");
             return TransportStatus::InitializationFailed;
         }
 
@@ -86,127 +150,79 @@ TransportStatus Nrf24Transport::initialize() {
 
         if (spi_bus_add_device(SPI2_HOST, &interface_config, &spi_device_) != ESP_OK) {
             (void)spi_bus_free(SPI2_HOST);
+            ESP_LOGW(tag, "SPI device registration failed");
             return TransportStatus::InitializationFailed;
         }
     }
 
-    constexpr uint8_t RF_CH = 0x05;
-    constexpr uint8_t channel = 76;
+    // Reassert standby on every attempt, including retries after partial setup.
+    if (gpio_set_level(CE_PIN, 0) != ESP_OK) {
+        ESP_LOGW(tag, "CE standby level failed");
+        return TransportStatus::InitializationFailed;
+    }
+    // Allow the specified 100 ms supply ramp plus 10.3 ms power-on reset.
+    vTaskDelay(pdMS_TO_TICKS(120) + 1);
 
-    const uint8_t write_bytes[2] = {
-        0x20 | RF_CH, // Write-register command + register address
-        channel      // Value to store
+    // Power down first so a warm MCU restart can safely replace old radio settings.
+    constexpr uint8_t crc_config = 0x0C; // EN_CRC | CRCO; PRIM_RX and PWR_UP clear.
+    if (!writeAndVerify(CONFIG, &crc_config, 1)) {
+        return TransportStatus::InitializationFailed;
+    }
+
+    struct RegisterSetting { uint8_t reg; uint8_t value; };
+    constexpr RegisterSetting settings[] = {
+        {0x05, 76},   // RF_CH: channel 76.
+        {0x03, 0x03}, // SETUP_AW: five-byte addresses.
+        {0x02, 0x01}, // EN_RXADDR: pipe 0 only.
+        {0x01, 0x01}, // EN_AA: auto-ack on pipe 0 only.
+        {0x04, 0x3F}, // SETUP_RETR: 1000 us delay, at most 15 retransmissions.
+        {0x06, 0x06}, // RF_SETUP: 1 Mbps, 0 dBm, test modes disabled.
+        {0x1C, 0x00}, // DYNPD: static payloads on all pipes.
+        {0x1D, 0x00}, // FEATURE: no dynamic payloads, ACK payloads or NO_ACK command.
+        {0x11, sizeof(Nrf24Packet)}, // RX_PW_P0: exactly 32 bytes.
+        {0x12, 0}, {0x13, 0}, {0x14, 0}, {0x15, 0}, {0x16, 0}, // Unused pipes.
     };
-
-    spi_transaction_t write_transaction{};
-    write_transaction.length = 16; // Two bytes, measured in bits
-    write_transaction.tx_buffer = write_bytes;
-
-    if (spi_device_transmit(spi_device_, &write_transaction) != ESP_OK) {
-        return TransportStatus::InitializationFailed;
-    }
-    uint8_t actual_channel{};
-    if (readRegister(RF_CH, &actual_channel, sizeof(actual_channel)) != ESP_OK ||
-        actual_channel != channel) {
-        return TransportStatus::InitializationFailed;
+    for (const auto& setting : settings) {
+        if (!writeAndVerify(setting.reg, &setting.value, 1)) {
+            return TransportStatus::InitializationFailed;
+        }
     }
 
-    constexpr uint8_t CONFIG = 0x00;
-    constexpr uint8_t EN_CRC = 1U << 3;
-    constexpr uint8_t CRCO = 1U << 2;
-    constexpr uint8_t PWR_UP = 1U << 1;
-    // Two-byte radio CRC, powered up, PRIM_RX cleared. CE stays low for standby.
-    constexpr uint8_t config = EN_CRC | CRCO | PWR_UP;
-
-    const uint8_t config_write_bytes[2] = {0x20 | CONFIG, config};
-    spi_transaction_t config_write_transaction{};
-    config_write_transaction.length = 16;
-    config_write_transaction.tx_buffer = config_write_bytes;
-
-    if (spi_device_transmit(spi_device_, &config_write_transaction) != ESP_OK) {
+    // SPI transfer order. PTX pipe 0 must match TX_ADDR to receive auto-acks.
+    constexpr uint8_t address[] = {0xD2, 0xF0, 0xF0, 0xF0, 0xF0};
+    if (!writeAndVerify(0x10, address, sizeof(address)) ||
+        !writeAndVerify(0x0A, address, sizeof(address))) {
         return TransportStatus::InitializationFailed;
     }
 
-    // Allow the internal crystal to settle after PWR_UP before further startup.
-    esp_rom_delay_us(1500);
-
-    uint8_t actual_config{};
-    if (readRegister(CONFIG, &actual_config, sizeof(actual_config)) != ESP_OK ||
-        actual_config != config) {
+    // CE is low and the radio is powered down: no active packet can be interrupted.
+    if (sendCommand(0xE1) != ESP_OK || sendCommand(0xE2) != ESP_OK) {
+        ESP_LOGW(tag, "FIFO flush command failed");
+        return TransportStatus::InitializationFailed;
+    }
+    // STATUS IRQ bits are write-one-to-clear, not ordinary writable bits.
+    if (writeRegister(STATUS, &irq_flags, 1) != ESP_OK) {
+        ESP_LOGW(tag, "IRQ clear SPI transfer failed");
+        return TransportStatus::InitializationFailed;
+    }
+    uint8_t status{};
+    uint8_t fifo_status{};
+    if (readRegister(STATUS, &status, 1) != ESP_OK || status != 0x0E ||
+        readRegister(FIFO_STATUS, &fifo_status, 1) != ESP_OK || fifo_status != 0x11) {
+        ESP_LOGW(tag, "Startup state mismatch: STATUS=0x%02x FIFO_STATUS=0x%02x",
+                 status, fifo_status);
         return TransportStatus::InitializationFailed;
     }
 
-    // Set and verify the five-byte address width before writing radio addresses.
-    constexpr uint8_t SETUP_AW = 0x03;      // Register address.
-    constexpr uint8_t address_width = 0x03; // Five-byte address encoding.
-
-    const uint8_t width_bytes[2] = {
-        0x20 | SETUP_AW,
-        address_width
-    };
-
-    spi_transaction_t width_transaction{};
-    width_transaction.length = sizeof(width_bytes) * 8;
-    width_transaction.tx_buffer = width_bytes;
-
-    if (spi_device_transmit(spi_device_, &width_transaction) != ESP_OK) {
+    constexpr uint8_t standby_config = crc_config | 0x02; // PWR_UP; CE stays low.
+    if (!writeAndVerify(CONFIG, &standby_config, 1)) {
         return TransportStatus::InitializationFailed;
     }
+    esp_rom_delay_us(1500); // Power-down to standby-I oscillator startup.
 
-    uint8_t actual_width{};
-    if (readRegister(SETUP_AW, &actual_width, sizeof(actual_width)) != ESP_OK ||
-        actual_width != address_width) {
-        return TransportStatus::InitializationFailed;
-    }
-
-    constexpr uint8_t TX_ADDR = 0x10;
-
-    // Example address, in SPI transfer order.
-    const uint8_t bytes[6] = {
-        0x20 | TX_ADDR,
-        0xD2, 0xF0, 0xF0, 0xF0, 0xF0
-    };
-
-    spi_transaction_t transaction{};
-    transaction.length = sizeof(bytes) * 8;
-    transaction.tx_buffer = bytes;
-
-    if (spi_device_transmit(spi_device_, &transaction) != ESP_OK) {
-        return TransportStatus::InitializationFailed;
-    }
-
-    uint8_t actual_address[5]{};
-    if (readRegister(TX_ADDR, actual_address, sizeof(actual_address)) != ESP_OK ||
-        std::memcmp(actual_address, bytes + 1, sizeof(actual_address)) != 0) {
-        return TransportStatus::InitializationFailed;
-    }
-
-    constexpr uint8_t RX_ADDR_P0 = 0x0A;
-
-    // Copy the existing TX address, excluding its SPI command byte.
-    uint8_t rx_address_bytes[6]{};
-    rx_address_bytes[0] = 0x20 | RX_ADDR_P0;
-    std::memcpy(rx_address_bytes + 1, bytes + 1, sizeof(actual_address));
-
-    spi_transaction_t rx_address_transaction{};
-    rx_address_transaction.length = sizeof(rx_address_bytes) * 8;
-    rx_address_transaction.tx_buffer = rx_address_bytes;
-
-    if (spi_device_transmit(spi_device_, &rx_address_transaction) != ESP_OK) {
-        return TransportStatus::InitializationFailed;
-    }
-
-    uint8_t actual_rx_address[5]{};
-    if (readRegister(RX_ADDR_P0,
-                     actual_rx_address,
-                     sizeof(actual_rx_address)) != ESP_OK ||
-        std::memcmp(actual_rx_address,
-                    rx_address_bytes + 1,
-                    sizeof(actual_rx_address)) != 0) {
-        return TransportStatus::InitializationFailed;
-    }
-
-    // TODO: Configure RX pipes, ACKs, payloads, FIFOs and RX/TX before reporting readiness.
+    ESP_LOGI(tag, "Register and FIFO checks passed; CE low, powered standby");
+    // A configured radio is not yet a usable TransportInterface implementation.
+    ESP_LOGW(tag, "Transport unavailable: packet encoding and RX/TX are unfinished");
     return TransportStatus::InitializationFailed;
 }
 

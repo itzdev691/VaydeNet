@@ -83,3 +83,13 @@ echo "PASS: Packet layout"
     "$repo_root/tests/unit/esp_now_receive_queue_test.cpp" \
     -o "$test_build_dir/esp_now_receive_queue_test"
 "$test_build_dir/esp_now_receive_queue_test"
+
+"$cxx" \
+    "${common_flags[@]}" \
+    -I"$repo_root/tests/mocks/esp-idf" \
+    -I"$repo_root/packages/adapters/nrf24l01" \
+    -I"$repo_root/packages/VaydeEngine/include" \
+    "$repo_root/packages/adapters/nrf24l01/Nrf24Transport.cpp" \
+    "$repo_root/tests/unit/nrf24_startup_test.cpp" \
+    -o "$test_build_dir/nrf24_startup_test"
+"$test_build_dir/nrf24_startup_test"

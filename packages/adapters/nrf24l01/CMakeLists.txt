@@ -8,4 +8,6 @@ idf_component_register(
     PRIV_REQUIRES
         esp_driver_gpio
         esp_rom
+        freertos
+        log
 )
