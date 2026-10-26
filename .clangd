@@ -1,0 +1,6 @@
+CompileFlags:
+  CompilationDatabase: apps/node
+  # The active compilation database is generated for espnow_esp32s3.
+  Compiler: /Users/itz.devv/.platformio/packages/toolchain-xtensa-esp-elf/bin/xtensa-esp32s3-elf-g++
+  # GCC-only optimization flags are irrelevant to editor diagnostics.
+  Remove: [-fno-shrink-wrap, -fno-tree-switch-conversion, -fstrict-volatile-bitfields]
