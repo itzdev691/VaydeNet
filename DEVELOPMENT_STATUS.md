@@ -1,15 +1,19 @@
 # VaydeNet Development Status
 
-Snapshot: October 14, 2026
+Snapshot: October 26, 2026
 
 ## Current source checkpoint
 
-Reviewed `/Volumes/ExtVault/VaydeNet` on `feat/nrf24-adapter-scaffold` at
-`24b5708`. The working tree was clean before this documentation update and
-matched its upstream. After fetching, `origin/main` was `212ad8d`; the feature
-branch was zero commits behind and 18 ahead. These counts describe Git ancestry,
-not the number of unique changes: main includes squash-merged feature work.
-No merge or whole-branch merge-readiness assessment was performed in this review.
+Rechecked the recovered October 17 nRF24 startup-check work in the authoritative
+`/Volumes/ExtVault/VaydeNet` checkout on October 26. Before delivery,
+`feat/nrf24-adapter-scaffold` and its fetched upstream both pointed to `a72b834`.
+The recovered implementation, tests and register-check application are committed
+as `266c6af`; the supplied clangd and WT32 editor changes are committed separately
+as `b226b3f`. This documentation refresh records the current verification below.
+The October 19 external-drive persistence uncertainty is resolved for the source
+present and validated in this checkout. No merge or whole-branch merge-readiness
+assessment was performed. Push results and final delivery commit IDs are recorded
+separately in the Obsidian project notes after remote verification.
 
 VaydeNet currently provides a portable C++17 engine with an ESP-NOW prototype
 node. The engine validates the packed 220-byte `Packet`, decodes supported type
@@ -25,31 +29,46 @@ with an immediate heartbeat and subsequent attempts every five seconds.
 | MicroPython | Native `_vaydenet` reuses the engine; Python owns Wi-Fi/ESP-NOW. One serialized session. Included in committed history; dated “uncommitted” records below are historical. |
 | WT32 | Arduino Ethernet monitoring/dashboard and a four-entry telemetry queue feeding VaydeEngine then ESP-NOW. It does not use `packages/node` or supply a reusable Ethernet adapter. |
 | P4+C6 | P4 host bridge and board defaults are committed. Host dependencies pin ESP-Hosted 2.12.8 and Wi-Fi Remote 1.6.5. October 11 user-confirmed heartbeat sending remains historical transmission evidence, without paired receiver capture. |
-| nRF24 | Registered ESP-IDF component; SPI register-configuration scaffold only. No application constructs it. RX/TX/completion remain `NotInitialized` stubs. |
+| nRF24 | Registered ESP-IDF component with startup register/FIFO checks and a dedicated register-test application. Normal node bootstrap does not select it. RX/TX/completion remain `NotInitialized` stubs. |
 
 ### nRF24 register checkpoint
 
 `packages/adapters/nrf24l01/Nrf24Transport.cpp` configures SPI2, mode 0 at 1 MHz,
-with CE=5, CSN=4, MOSI=1, MISO=6 and SCK=7. Its bounded `readRegister()` helper
-reads 1–5 bytes after the STATUS byte. Initialization writes and verifies RF_CH
-76, CONFIG `0x0E` after a 1,500 us wait, SETUP_AW `0x03`, TX_ADDR
-`D2 F0 F0 F0 F0`, and matching RX_ADDR_P0. CE remains low. Even matching all
-register checks deliberately returns `InitializationFailed`.
+with CE=5, CSN=4, MOSI=1, MISO=6 and SCK=7. Bounded read/write helpers transfer
+1–5 register bytes. Every configured value is read back; five-byte addresses
+are compared byte by byte. Failures log the affected register or startup state.
 
-Commit `7856bae` added the shared read helper/TX address verification;
-`24b5708` added address-width and pipe-0 address verification. The separate
-`Nrf24Packet.h` has a 32-byte size assertion and 12-byte payload, but no codec or
-engine integration. `TransportInterface` still exchanges the 220-byte `Packet`.
-Pipe enablement, ACK/retry/payload configuration, FIFO startup and actual RX/TX
-remain unfinished. This source is not evidence of physical register responses
-or RF operation.
+Initialization keeps CE low, allows 120 ms for supply ramp/reset, and explicitly
+powers down before replacing settings on a warm restart. It writes and verifies:
+
+- RF_CH 76, SETUP_AW `0x03`, TX_ADDR `D2 F0 F0 F0 F0` and matching RX_ADDR_P0.
+- EN_RXADDR `0x01` and EN_AA `0x01`: only pipe 0 and its auto-ack enabled.
+- SETUP_RETR `0x3F`: 1000 us delay and at most 15 retransmissions.
+- RF_SETUP `0x06`: 1 Mbps, 0 dBm, test modes disabled.
+- DYNPD/FEATURE zero, RX_PW_P0 32, and RX_PW_P1–5 zero.
+
+It flushes both FIFOs, clears IRQ flags using STATUS write-one-to-clear semantics,
+and requires STATUS `0x0E` and FIFO_STATUS `0x11`. Finally it writes/verifies CONFIG
+`0x0E`, waits 1500 us, and logs that register/FIFO checks passed. CE stays low in
+powered standby. Even completed checks deliberately return `InitializationFailed`
+because packet encoding and RX/TX/completion are unfinished. Read-back does not
+prove oscillator behavior or RF operation.
+
+`apps/examples/nrf24l01/register-check` now constructs the actual adapter and runs
+one initialization attempt, with C5 and P4 pre-v3/revision-3 build profiles.
+This is separate from the normal ESP-NOW application. Its README documents wiring, build commands,
+expected success/failure logs and the hardware-proof boundary.
+
+`Nrf24Packet.h` still asserts a 32-byte frame with 12 payload bytes; there is no
+codec or engine integration. `TransportInterface` still exchanges the 220-byte
+`Packet`. The 32-byte register-test payload width does not finalize that contract.
 
 ### Review gaps
 
 - Resolve the 220-byte engine transport contract versus the proposed 32-byte
   nRF24 frame before implementing message delivery; serialization and optional
   fragmentation/reassembly remain design work.
-- Expand automated coverage beyond the seven C++ host executables and four
+- Expand automated coverage beyond the eight C++ host executables and four
   node CI targets. CI omits MicroPython suites, WT32, DOIT and both P4 variants;
   it runs on main pushes, PRs to main and manual dispatch, not feature pushes.
 - Test ESP-NOW initialization failure/retry and shutdown/restart ownership.
@@ -61,6 +80,53 @@ or RF operation.
   provisioning contract. The full `NodeSettings` schema is not persisted.
 - Command dispatch, retained inbox, authentication and custom receiver notes
   remain plans. Source encoding/decoding currently supports type `1` only.
+
+### Verification performed October 26, 2026
+
+- Source: inspected all 19 pending source, test, example, status and editor files.
+  Normal bootstrap still selects ESP-NOW; nRF24 remains unavailable for packets.
+- Tests: all eight C++ host executables passed with AddressSanitizer,
+  UndefinedBehaviorSanitizer and warnings treated as errors. The nRF24 suite
+  passed all 41 SPI-failure and 20 read-back-mismatch cases, stuck responses,
+  GPIO/resource failures, cleanup and retries. The CPython heartbeat recovery,
+  receive-polling and GPIO-cleanup regression also passed.
+- Build: C5, P4 pre-v3 and P4 revision-3 register-check firmware all built
+  successfully in this authoritative checkout with ESP-IDF 5.5.4 and the dedicated
+  external PlatformIO store. Each ELF contains `Nrf24Transport::initialize()` and
+  `app_main`. The normal `espnow_esp32c5` node firmware also built successfully.
+  The build-generated node dependency-lock drift was restored to its original
+  tracked content; no dependency update is included.
+- Git: whitespace checks passed. Firmware/tests and editor settings have separate
+  detailed commits; this status refresh preserves earlier dated evidence below.
+  Feature-branch pushes alone do not trigger the current firmware CI workflow.
+- Flash/runtime/peer/deployment: none performed in this delivery. Physical
+  register responses, oscillator behavior and RF packet delivery remain unverified.
+  Native MicroPython integration/heap-lock suites were not rerun. No merge.
+
+### Verification performed October 17, 2026
+
+- Tests: all eight C++ host executables passed with AddressSanitizer and
+  UndefinedBehaviorSanitizer. The new nRF24 suite exercises successful register
+  setup from stale state, all 41 SPI-transfer failure points, all 20 read-back
+  mismatch points (including the final byte of both addresses), stuck-low/high
+  MISO responses, GPIO/bus/device-registration failures, resource cleanup and
+  explicit retries. Receive/transmit/completion stay unavailable throughout.
+  The CPython heartbeat error-recovery regression also passed.
+- Build: ESP-IDF 5.5.4 / GCC 14.2 register-test firmware linked successfully
+  for C5, P4 pre-v3 and P4 revision 3; the normal C5 ESP-NOW node also passed.
+  Each register-test ELF retains the actual adapter initialization method and
+  application entry point. Separate adapter compilation for all three profiles
+  passed with C++17, `-Wall -Wextra -Werror`.
+- P4 profiles: the first pre-v3 test link exposed a mismatch with ESP-IDF's
+  default revision-3 memory layout. Register-test profiles now reuse the matching
+  node pre-v3/revision-3 SDK defaults; both corrected full-image builds passed.
+  Generated minimum revisions were 1 and 300 respectively. No revision or wiring
+  was verified on physical hardware.
+- Git: changes remain uncommitted in the separate clone. The node build's
+  generated dependency-lock change was restored to the initial tracked content.
+- Flash/runtime/peer: no connected USB development board was detected; no flash,
+  physical register responses, oscillator behavior or radio delivery verified.
+  Native MicroPython integration/heap-lock suites were not rerun.
 
 ### Verification performed October 14, 2026
 
@@ -81,7 +147,7 @@ or RF operation.
 
 The sections below preserve earlier checkpoints. Branch names, “current,”
 “uncommitted,” readiness statements, images and device results apply to their
-stated dates; use the October 14 summary above for the present source boundary.
+stated dates; use the October 26 summary above for the present source boundary.
 
 ## MicroPython regression checkpoint — October 4, 2026
 
