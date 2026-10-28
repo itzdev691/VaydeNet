@@ -1,19 +1,16 @@
 # VaydeNet Development Status
 
-Snapshot: October 26, 2026
+Snapshot: October 27, 2026
 
 ## Current source checkpoint
 
-Rechecked the recovered October 17 nRF24 startup-check work in the authoritative
-`/Volumes/ExtVault/VaydeNet` checkout on October 26. Before delivery,
-`feat/nrf24-adapter-scaffold` and its fetched upstream both pointed to `a72b834`.
-The recovered implementation, tests and register-check application are committed
-as `266c6af`; the supplied clangd and WT32 editor changes are committed separately
-as `b226b3f`. This documentation refresh records the current verification below.
-The October 19 external-drive persistence uncertainty is resolved for the source
-present and validated in this checkout. No merge or whole-branch merge-readiness
-assessment was performed. Push results and final delivery commit IDs are recorded
-separately in the Obsidian project notes after remote verification.
+On October 27 the nRF24 adapter gained packet framing, receive, transmit and
+completion handling in the authoritative `/Volumes/ExtVault/VaydeNet` checkout,
+on `feat/nrf24-adapter-scaffold` based on `e86b89f`. The October 26 startup-check
+delivery (`266c6af`, `b226b3f`, `e86b89f`) is the preceding checkpoint. An
+ExtVault disconnect interrupted one firmware build; on reconnection every edit
+was present and the host suite passed again. No merge or whole-branch
+merge-readiness assessment was performed.
 
 VaydeNet currently provides a portable C++17 engine with an ESP-NOW prototype
 node. The engine validates the packed 220-byte `Packet`, decodes supported type
@@ -25,52 +22,68 @@ with an immediate heartbeat and subsequent attempts every five seconds.
 | Area | Current source boundary |
 | --- | --- |
 | Portable engine | Version/length/type/TTL/CRC validation, type-1 decode/encode, broadcast submission and completion mapping. No routing, authentication, replay protection or persistent inbox. |
-| ESP-NOW node | Four-slot receive queue, one pending broadcast transmission, callback completion queue. Bootstrap selects ESP-NOW; Nrf24/Ethernet settings return `UnsupportedTransport`. |
+| ESP-NOW node | Four-slot receive queue, one pending broadcast transmission, callback completion queue. One ESP-NOW message carries one whole `Packet`. Bootstrap selects ESP-NOW; Nrf24/Ethernet settings return `UnsupportedTransport`. |
 | MicroPython | Native `_vaydenet` reuses the engine; Python owns Wi-Fi/ESP-NOW. One serialized session. Included in committed history; dated “uncommitted” records below are historical. |
 | WT32 | Arduino Ethernet monitoring/dashboard and a four-entry telemetry queue feeding VaydeEngine then ESP-NOW. It does not use `packages/node` or supply a reusable Ethernet adapter. |
 | P4+C6 | P4 host bridge and board defaults are committed. Host dependencies pin ESP-Hosted 2.12.8 and Wi-Fi Remote 1.6.5. October 11 user-confirmed heartbeat sending remains historical transmission evidence, without paired receiver capture. |
-| nRF24 | Registered ESP-IDF component with startup register/FIFO checks and a dedicated register-test application. Normal node bootstrap does not select it. RX/TX/completion remain `NotInitialized` stubs. |
+| nRF24 | Complete `TransportInterface` implementation: startup checks, eight-frame `Packet` framing, receive, non-blocking transmit and completion. Host-tested only. Normal node bootstrap does not select it; the node build compiles the component but does not link it. |
 
-### nRF24 register checkpoint
+### nRF24 transport
 
-`packages/adapters/nrf24l01/Nrf24Transport.cpp` configures SPI2, mode 0 at 1 MHz,
-with CE=5, CSN=4, MOSI=1, MISO=6 and SCK=7. Bounded read/write helpers transfer
-1–5 register bytes. Every configured value is read back; five-byte addresses
-are compared byte by byte. Failures log the affected register or startup state.
+`packages/adapters/nrf24l01/` has two layers:
 
-Initialization keeps CE low, allows 120 ms for supply ramp/reset, and explicitly
-powers down before replacing settings on a warm restart. It writes and verifies:
+- `Nrf24Frame.h/.cpp` is portable framing with no ESP-IDF dependency. A 32-byte
+  `Nrf24Frame` holds a four-byte header (format `0xA1`, sender-local transfer ID,
+  index, count) and 28 bytes of the 220-byte `Packet`, so each Packet is eight
+  frames; the last is zero-padded. `Nrf24Reassembler` is single-slot and in order:
+  index 0 starts a Packet, and any gap, foreign transfer or malformed header
+  discards the partial Packet. Integrity is left to the engine CRC.
+- `Nrf24Transport.cpp` drives the radio over SPI2, mode 0 at 1 MHz, with fixed
+  test wiring CE=5, CSN=4, MOSI=1, MISO=6 and SCK=7.
+
+Startup keeps CE low, allows 120 ms for supply ramp/reset, and powers down before
+replacing settings on a warm restart. It writes and reads back:
 
 - RF_CH 76, SETUP_AW `0x03`, TX_ADDR `D2 F0 F0 F0 F0` and matching RX_ADDR_P0.
 - EN_RXADDR `0x01` and EN_AA `0x01`: only pipe 0 and its auto-ack enabled.
 - SETUP_RETR `0x3F`: 1000 us delay and at most 15 retransmissions.
 - RF_SETUP `0x06`: 1 Mbps, 0 dBm, test modes disabled.
-- DYNPD/FEATURE zero, RX_PW_P0 32, and RX_PW_P1–5 zero.
+- DYNPD/FEATURE zero, RX_PW_P0 32 (one frame), and RX_PW_P1–5 zero.
 
-It flushes both FIFOs, clears IRQ flags using STATUS write-one-to-clear semantics,
-and requires STATUS `0x0E` and FIFO_STATUS `0x11`. Finally it writes/verifies CONFIG
-`0x0E`, waits 1500 us, and logs that register/FIFO checks passed. CE stays low in
-powered standby. Even completed checks deliberately return `InitializationFailed`
-because packet encoding and RX/TX/completion are unfinished. Read-back does not
-prove oscillator behavior or RF operation.
+It flushes both FIFOs, clears IRQ flags (write-one-to-clear), requires STATUS
+`0x0E` and FIFO_STATUS `0x11`, powers up into standby for 1500 us, then enters
+receive mode (CONFIG `0x0F`, CE high) and returns `Ok`.
 
-`apps/examples/nrf24l01/register-check` now constructs the actual adapter and runs
-one initialization attempt, with C5 and P4 pre-v3/revision-3 build profiles.
-This is separate from the normal ESP-NOW application. Its README documents wiring, build commands,
-expected success/failure logs and the hardware-proof boundary.
+At runtime:
 
-`Nrf24Packet.h` still asserts a 32-byte frame with 12 payload bytes; there is no
-codec or engine integration. `TransportInterface` still exchanges the 220-byte
-`Packet`. The 32-byte register-test payload width does not finalize that contract.
+- `tryReceive()` drains at most three frames per call into the reassembler and
+  returns `Received` when a Packet completes.
+- `tryTransmit()` switches to transmit mode, loads up to three frames and returns
+  `Queued`, or `Busy` while a Packet is pending.
+- `pollTransmitCompletion()` tops up the TX FIFO and returns `Sent` once all eight
+  frames are acknowledged. A lost ack (MAX_RT), an SPI error or a 500 ms timeout
+  returns `Failed`. Either way TX is flushed and the radio returns to receive mode;
+  if that fails, the transport requires `initialize()` again.
+
+Boundaries: with auto-ack on a shared address, `Sent` means at least one receiver
+acknowledged every frame; several simultaneous receivers may collide on acks. Two
+senders whose transfer IDs coincide can interleave; the engine CRC rejects the
+result. The fixed pins are unsafe on classic ESP32, where GPIO 6/7 are flash pins.
+
+`apps/examples/nrf24l01/register-check` constructs the actual adapter, runs one
+initialization and leaves the radio listening. It never transmits. C5 and P4
+pre-v3/revision-3 profiles are provided; its README documents wiring and logs.
 
 ### Review gaps
 
-- Resolve the 220-byte engine transport contract versus the proposed 32-byte
-  nRF24 frame before implementing message delivery; serialization and optional
-  fragmentation/reassembly remain design work.
-- Expand automated coverage beyond the eight C++ host executables and four
-  node CI targets. CI omits MicroPython suites, WT32, DOIT and both P4 variants;
-  it runs on main pushes, PRs to main and manual dispatch, not feature pushes.
+- Verify nRF24 on hardware: register responses, then a two-radio link test of
+  Packet delivery in both directions. No such evidence exists yet.
+- Decide nRF24 node integration: bootstrap selection, per-board pin
+  configuration and provisioning of `TransportType::Nrf24`.
+- Expand automated coverage beyond the ten C++ host executables and four
+  node CI targets. CI omits MicroPython suites, WT32, DOIT, both P4 variants
+  and the register-check firmware; it runs on main pushes, PRs to main and
+  manual dispatch, not feature pushes.
 - Test ESP-NOW initialization failure/retry and shutdown/restart ownership.
   Initialization creates the default event loop; shutdown does not release
   Wi-Fi/event-loop resources. The host mock always succeeds at event-loop
@@ -80,6 +93,30 @@ codec or engine integration. `TransportInterface` still exchanges the 220-byte
   provisioning contract. The full `NodeSettings` schema is not persisted.
 - Command dispatch, retained inbox, authentication and custom receiver notes
   remain plans. Source encoding/decoding currently supports type `1` only.
+
+### Verification performed October 27, 2026
+
+- Source: replaced the unused `Nrf24Packet.h` (12-byte payload, unable to carry
+  the 200-byte payload) with `Nrf24Frame`; implemented RX/TX/completion; renamed
+  the nRF24 test to `nrf24_transport_test.cpp` and added `nrf24_frame_test.cpp`.
+- Tests: all ten C++ host executables passed with AddressSanitizer,
+  UndefinedBehaviorSanitizer and warnings treated as errors, and passed again
+  after the drive reconnected. The nRF24 suites cover 43 startup SPI failures,
+  21 read-back mismatches, 31 transmit-cycle SPI failure points, receive SPI
+  failures, ack loss, timeout, eight-frame round trip and reassembly rejection.
+  Deliberately injected bugs (ignoring MAX_RT, accepting out-of-order frames)
+  were detected.
+- Build: clean C5, P4 pre-v3 and P4 revision-3 register-check firmware built
+  with ESP-IDF 5.5.4 and the dedicated external PlatformIO store (C5: 13,284 B
+  RAM, 239,368 B flash). The C5 ELF contains all four transport methods and the
+  framing code. The first attempt omitted `Nrf24Frame.cpp` because of a stale
+  CMake configuration; clean builds fixed it. The normal
+  `espnow_esp32c5` node also passed a clean build (41,636 B RAM, 883,488 B flash).
+- Git: whitespace checks passed. The generated node dependency-lock drift was
+  restored to its tracked content.
+- Flash/runtime/peer/deployment: none performed. Physical radio behavior and
+  RF packet delivery remain unverified. Native MicroPython suites were not
+  rerun. No merge.
 
 ### Verification performed October 26, 2026
 
