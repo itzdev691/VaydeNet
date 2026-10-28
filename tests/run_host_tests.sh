@@ -90,6 +90,16 @@ echo "PASS: Packet layout"
     -I"$repo_root/packages/adapters/nrf24l01" \
     -I"$repo_root/packages/VaydeEngine/include" \
     "$repo_root/packages/adapters/nrf24l01/Nrf24Transport.cpp" \
-    "$repo_root/tests/unit/nrf24_startup_test.cpp" \
-    -o "$test_build_dir/nrf24_startup_test"
-"$test_build_dir/nrf24_startup_test"
+    "$repo_root/packages/adapters/nrf24l01/Nrf24Frame.cpp" \
+    "$repo_root/tests/unit/nrf24_transport_test.cpp" \
+    -o "$test_build_dir/nrf24_transport_test"
+"$test_build_dir/nrf24_transport_test"
+
+"$cxx" \
+    "${common_flags[@]}" \
+    -I"$repo_root/packages/adapters/nrf24l01" \
+    -I"$repo_root/packages/VaydeEngine/include" \
+    "$repo_root/packages/adapters/nrf24l01/Nrf24Frame.cpp" \
+    "$repo_root/tests/unit/nrf24_frame_test.cpp" \
+    -o "$test_build_dir/nrf24_frame_test"
+"$test_build_dir/nrf24_frame_test"

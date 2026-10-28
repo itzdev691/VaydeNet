@@ -1,5 +1,4 @@
 #include "Nrf24Transport.h"
-#include "Nrf24Packet.h"
 #include "driver/gpio.h"
 #include "esp_rom_sys.h"
 #include "esp_log.h"
@@ -20,6 +19,22 @@ constexpr uint8_t CONFIG = 0x00;
 constexpr uint8_t STATUS = 0x07;
 constexpr uint8_t FIFO_STATUS = 0x17;
 constexpr uint8_t irq_flags = 0x70;
+constexpr uint8_t rx_dr = 0x40;
+constexpr uint8_t tx_flags = 0x30; // TX_DS | MAX_RT.
+constexpr uint8_t max_rt = 0x10;
+constexpr uint8_t rx_empty = 0x01;
+constexpr uint8_t tx_empty = 0x10;
+constexpr uint8_t tx_full = 0x20;
+constexpr uint8_t R_RX_PAYLOAD = 0x61;
+constexpr uint8_t W_TX_PAYLOAD = 0xA0;
+constexpr uint8_t FLUSH_TX = 0xE1;
+constexpr uint8_t FLUSH_RX = 0xE2;
+constexpr uint8_t crc_config = 0x0C;                   // EN_CRC | CRCO.
+constexpr uint8_t standby_config = crc_config | 0x02;  // PWR_UP; PRIM_RX clear.
+constexpr uint8_t receive_config = standby_config | 0x01; // PRIM_RX.
+constexpr std::size_t rx_fifo_depth = 3;
+// Eight frames normally finish within tens of milliseconds; this bounds a wedged radio.
+constexpr TickType_t transmit_timeout = pdMS_TO_TICKS(500);
 }
 
 Nrf24Transport::~Nrf24Transport() {
@@ -110,7 +125,58 @@ esp_err_t Nrf24Transport::sendCommand(uint8_t command) {
     return result;
 }
 
+esp_err_t Nrf24Transport::writePayload(const Nrf24Frame& frame) {
+    if (spi_device_ == nullptr) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    uint8_t request[1 + sizeof(Nrf24Frame)]{};
+    request[0] = W_TX_PAYLOAD;
+    std::memcpy(request + 1, &frame, sizeof(frame));
+    spi_transaction_t transaction{};
+    transaction.length = sizeof(request) * 8;
+    transaction.tx_buffer = request;
+    const esp_err_t result = spi_device_transmit(spi_device_, &transaction);
+    esp_rom_delay_us(4);
+    return result;
+}
+
+esp_err_t Nrf24Transport::readPayload(Nrf24Frame& frame) {
+    if (spi_device_ == nullptr) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    uint8_t request[1 + sizeof(Nrf24Frame)];
+    uint8_t response[1 + sizeof(Nrf24Frame)]{};
+    std::memset(request, 0xFF, sizeof(request));
+    request[0] = R_RX_PAYLOAD;
+    spi_transaction_t transaction{};
+    transaction.length = sizeof(request) * 8;
+    transaction.rxlength = transaction.length;
+    transaction.tx_buffer = request;
+    transaction.rx_buffer = response;
+    const esp_err_t result = spi_device_transmit(spi_device_, &transaction);
+    esp_rom_delay_us(4);
+    if (result == ESP_OK) {
+        std::memcpy(&frame, response + 1, sizeof(frame));
+    }
+    return result;
+}
+
+bool Nrf24Transport::startListening() {
+    // Configuration changes happen with CE low; CE high then enters RX mode.
+    if (gpio_set_level(CE_PIN, 0) != ESP_OK ||
+        !writeAndVerify(CONFIG, &receive_config, 1) ||
+        gpio_set_level(CE_PIN, 1) != ESP_OK) {
+        ESP_LOGW(tag, "Receive mode entry failed");
+        return false;
+    }
+    return true;
+}
+
 TransportStatus Nrf24Transport::initialize() {
+    initialized_ = false;
+    transmit_pending_ = false;
+    reassembler_.reset();
+
     // Preserve the registered device if initialization is retried.
     if (spi_device_ == nullptr) {
         if (
@@ -164,7 +230,6 @@ TransportStatus Nrf24Transport::initialize() {
     vTaskDelay(pdMS_TO_TICKS(120) + 1);
 
     // Power down first so a warm MCU restart can safely replace old radio settings.
-    constexpr uint8_t crc_config = 0x0C; // EN_CRC | CRCO; PRIM_RX and PWR_UP clear.
     if (!writeAndVerify(CONFIG, &crc_config, 1)) {
         return TransportStatus::InitializationFailed;
     }
@@ -179,7 +244,7 @@ TransportStatus Nrf24Transport::initialize() {
         {0x06, 0x06}, // RF_SETUP: 1 Mbps, 0 dBm, test modes disabled.
         {0x1C, 0x00}, // DYNPD: static payloads on all pipes.
         {0x1D, 0x00}, // FEATURE: no dynamic payloads, ACK payloads or NO_ACK command.
-        {0x11, sizeof(Nrf24Packet)}, // RX_PW_P0: exactly 32 bytes.
+        {0x11, sizeof(Nrf24Frame)}, // RX_PW_P0: exactly 32 bytes.
         {0x12, 0}, {0x13, 0}, {0x14, 0}, {0x15, 0}, {0x16, 0}, // Unused pipes.
     };
     for (const auto& setting : settings) {
@@ -196,7 +261,7 @@ TransportStatus Nrf24Transport::initialize() {
     }
 
     // CE is low and the radio is powered down: no active packet can be interrupted.
-    if (sendCommand(0xE1) != ESP_OK || sendCommand(0xE2) != ESP_OK) {
+    if (sendCommand(FLUSH_TX) != ESP_OK || sendCommand(FLUSH_RX) != ESP_OK) {
         ESP_LOGW(tag, "FIFO flush command failed");
         return TransportStatus::InitializationFailed;
     }
@@ -214,29 +279,145 @@ TransportStatus Nrf24Transport::initialize() {
         return TransportStatus::InitializationFailed;
     }
 
-    constexpr uint8_t standby_config = crc_config | 0x02; // PWR_UP; CE stays low.
+    // PWR_UP with CE low enters standby-I.
     if (!writeAndVerify(CONFIG, &standby_config, 1)) {
         return TransportStatus::InitializationFailed;
     }
     esp_rom_delay_us(1500); // Power-down to standby-I oscillator startup.
 
     ESP_LOGI(tag, "Register and FIFO checks passed; CE low, powered standby");
-    // A configured radio is not yet a usable TransportInterface implementation.
-    ESP_LOGW(tag, "Transport unavailable: packet encoding and RX/TX are unfinished");
-    return TransportStatus::InitializationFailed;
+    if (!startListening()) {
+        return TransportStatus::InitializationFailed;
+    }
+    initialized_ = true;
+    ESP_LOGI(tag, "Receive mode active; transport ready");
+    return TransportStatus::Ok;
 }
 
-TransportReceiveStatus Nrf24Transport::tryReceive(Packet&) {
-    // TODO: Read a received frame after the nRF24 framing contract is defined.
-    return TransportReceiveStatus::NotInitialized;
+TransportReceiveStatus Nrf24Transport::tryReceive(Packet& packet) {
+    if (!initialized_) {
+        return TransportReceiveStatus::NotInitialized;
+    }
+    // Drain at most one FIFO's worth per poll so callers keep a bounded loop.
+    for (std::size_t i = 0; i < rx_fifo_depth; ++i) {
+        uint8_t fifo_status{};
+        if (readRegister(FIFO_STATUS, &fifo_status, 1) != ESP_OK) {
+            ESP_LOGW(tag, "Receive FIFO status read failed");
+            return TransportReceiveStatus::Empty;
+        }
+        if ((fifo_status & rx_empty) != 0) {
+            return TransportReceiveStatus::Empty;
+        }
+        Nrf24Frame frame{};
+        if (readPayload(frame) != ESP_OK || writeRegister(STATUS, &rx_dr, 1) != ESP_OK) {
+            ESP_LOGW(tag, "Receive payload SPI transfer failed");
+            reassembler_.reset();
+            return TransportReceiveStatus::Empty;
+        }
+        if (reassembler_.accept(frame, packet) == Nrf24ReassemblyStatus::Complete) {
+            return TransportReceiveStatus::Received;
+        }
+    }
+    return TransportReceiveStatus::Empty;
 }
 
-TransportTransmitStatus Nrf24Transport::tryTransmit(const Packet&) {
-    // TODO: Encode and submit a frame without waiting for transmission completion.
-    return TransportTransmitStatus::NotInitialized;
+bool Nrf24Transport::loadTransmitFrames() {
+    while (frames_loaded_ < kNrf24FramesPerPacket) {
+        uint8_t fifo_status{};
+        if (readRegister(FIFO_STATUS, &fifo_status, 1) != ESP_OK) {
+            return false;
+        }
+        if ((fifo_status & tx_full) != 0) {
+            return true;
+        }
+        Nrf24Frame frame{};
+        encodeNrf24Frame(transmit_packet_, transfer_id_, frames_loaded_, frame);
+        if (writePayload(frame) != ESP_OK) {
+            return false;
+        }
+        ++frames_loaded_;
+    }
+    return true;
+}
+
+TransportTransmitStatus Nrf24Transport::tryTransmit(const Packet& packet) {
+    if (!initialized_) {
+        return TransportTransmitStatus::NotInitialized;
+    }
+    if (transmit_pending_) {
+        return TransportTransmitStatus::Busy;
+    }
+
+    transmit_packet_ = packet;
+    ++transfer_id_;
+    frames_loaded_ = 0;
+    // CE low leaves RX; with PRIM_RX clear, CE high sends the TX FIFO in order.
+    if (gpio_set_level(CE_PIN, 0) != ESP_OK ||
+        !writeAndVerify(CONFIG, &standby_config, 1) ||
+        writeRegister(STATUS, &tx_flags, 1) != ESP_OK ||
+        !loadTransmitFrames() ||
+        gpio_set_level(CE_PIN, 1) != ESP_OK) {
+        ESP_LOGW(tag, "Transmit submission failed");
+        (void)finishTransmit(TransportTransmitCompletionStatus::Failed);
+        return TransportTransmitStatus::Failed;
+    }
+
+    transmit_pending_ = true;
+    transmit_started_ = xTaskGetTickCount();
+    return TransportTransmitStatus::Queued;
 }
 
 TransportTransmitCompletionStatus Nrf24Transport::pollTransmitCompletion() {
-    // TODO: Check radio status and report pending, sent, or failed transmission.
-    return TransportTransmitCompletionStatus::NotInitialized;
+    if (!initialized_) {
+        return TransportTransmitCompletionStatus::NotInitialized;
+    }
+    if (!transmit_pending_) {
+        return TransportTransmitCompletionStatus::Empty;
+    }
+
+    uint8_t status{};
+    if (readRegister(STATUS, &status, 1) != ESP_OK) {
+        ESP_LOGW(tag, "Transmit STATUS read failed");
+        return finishTransmit(TransportTransmitCompletionStatus::Failed);
+    }
+    if ((status & max_rt) != 0) {
+        ESP_LOGW(tag, "Frame %u of %u was not acknowledged",
+                 static_cast<unsigned>(frames_loaded_),
+                 static_cast<unsigned>(kNrf24FramesPerPacket));
+        return finishTransmit(TransportTransmitCompletionStatus::Failed);
+    }
+    if (!loadTransmitFrames()) {
+        ESP_LOGW(tag, "Transmit FIFO refill failed");
+        return finishTransmit(TransportTransmitCompletionStatus::Failed);
+    }
+    // A payload leaves the TX FIFO only after its auto-ack arrives.
+    uint8_t fifo_status{};
+    if (readRegister(FIFO_STATUS, &fifo_status, 1) != ESP_OK) {
+        ESP_LOGW(tag, "Transmit FIFO status read failed");
+        return finishTransmit(TransportTransmitCompletionStatus::Failed);
+    }
+    if (frames_loaded_ == kNrf24FramesPerPacket && (fifo_status & tx_empty) != 0) {
+        return finishTransmit(TransportTransmitCompletionStatus::Sent);
+    }
+    if (static_cast<TickType_t>(xTaskGetTickCount() - transmit_started_) >=
+        transmit_timeout) {
+        ESP_LOGW(tag, "Transmit timed out");
+        return finishTransmit(TransportTransmitCompletionStatus::Failed);
+    }
+    return TransportTransmitCompletionStatus::Pending;
+}
+
+TransportTransmitCompletionStatus Nrf24Transport::finishTransmit(
+    TransportTransmitCompletionStatus result
+) {
+    transmit_pending_ = false;
+    if (gpio_set_level(CE_PIN, 0) != ESP_OK ||
+        sendCommand(FLUSH_TX) != ESP_OK ||
+        writeRegister(STATUS, &tx_flags, 1) != ESP_OK ||
+        !startListening()) {
+        // Radio mode is unknown; callers must reinitialize before further use.
+        initialized_ = false;
+        ESP_LOGW(tag, "Radio not restored to receive mode; reinitialize required");
+    }
+    return result;
 }

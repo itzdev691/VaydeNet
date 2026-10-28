@@ -1,5 +1,5 @@
 idf_component_register(
-    SRCS "Nrf24Transport.cpp"
+    SRCS "Nrf24Transport.cpp" "Nrf24Frame.cpp"
     INCLUDE_DIRS
         "."
     REQUIRES
