@@ -1,6 +1,6 @@
 # VaydeNet Development Status
 
-Snapshot: October 27, 2026
+Snapshot: October 28, 2026
 
 ## Current source checkpoint
 
@@ -28,6 +28,33 @@ with an immediate heartbeat and subsequent attempts every five seconds.
 | P4+C6 | P4 host bridge and board defaults are committed. Host dependencies pin ESP-Hosted 2.12.8 and Wi-Fi Remote 1.6.5. October 11 user-confirmed heartbeat sending remains historical transmission evidence, without paired receiver capture. |
 | nRF24 | Complete `TransportInterface` implementation: startup checks, eight-frame `Packet` framing, receive, non-blocking transmit and completion. Host-tested only. Normal node bootstrap does not select it; the node build compiles the component but does not link it. |
 
+### Packet format decision - October 28, 2026
+
+Retain the universal fixed 220-byte `Packet` and the current nRF24 eight-frame
+encoding for now. This favors implementation simplicity, shared validation and
+easier debugging over minimizing airtime. `Nrf24Frame.h/.cpp` remain adapter-owned
+encoding and reassembly helpers; no engine or transport contract redesign is
+planned as part of this decision.
+
+Accepted tradeoff: even a short payload sends the entire Packet, including unused
+payload space. nRF24 carries it in eight static 32-byte frames, each with a
+four-byte fragment header and up to 28 Packet bytes. This creates additional
+radio work and can increase airtime, energy use, congestion, latency and retry
+exposure. These are architectural costs, not newly measured hardware failures.
+
+Revisit the encoding only when an observed problem with airtime, power use,
+latency, congestion or delivery reliability justifies it. The deferred alternative
+is one common logical message with transport-specific encoding: preserve shared
+identity and message semantics, encode actual payload length, fit small nRF24
+messages into one frame when possible, and fragment larger messages only when
+needed. A shared protocol identifier alone would not establish interoperability;
+versions, field meanings and decoding rules must also agree.
+
+This decision supersedes the earlier transport-native direction as immediate
+work; it does not schedule a migration. The host suite passed during the October
+28 source review. This documentation update adds no firmware changes, firmware
+build, flash, runtime or peer-radio evidence.
+
 ### nRF24 transport
 
 `packages/adapters/nrf24l01/` has two layers:
@@ -36,8 +63,8 @@ with an immediate heartbeat and subsequent attempts every five seconds.
   `Nrf24Frame` holds a four-byte header (format `0xA1`, sender-local transfer ID,
   index, count) and 28 bytes of the 220-byte `Packet`, so each Packet is eight
   frames; the last is zero-padded. `Nrf24Reassembler` is single-slot and in order:
-  index 0 starts a Packet, and any gap, foreign transfer or malformed header
-  discards the partial Packet. Integrity is left to the engine CRC.
+  index 0 starts a Packet; gaps and foreign transfers discard the partial Packet,
+  while malformed headers are rejected without clearing it. Integrity is left to the engine CRC.
 - `Nrf24Transport.cpp` drives the radio over SPI2, mode 0 at 1 MHz, with fixed
   test wiring CE=5, CSN=4, MOSI=1, MISO=6 and SCK=7.
 
@@ -766,9 +793,14 @@ do not establish application-queue runtime behavior, flash, or peer delivery.
 
 It does not provide a reusable Ethernet transport adapter or connect Ethernet to the node bootstrap.
 
-## Revised Protocol Direction
+## Deferred Protocol Alternative
 
-VaydeNet will not require every transport to carry one identical packed C++ structure or one fixed frame size.
+The October 28, 2026 decision above retains the universal 220-byte Packet until
+a practical problem justifies changing it. The following describes a deferred
+alternative, not a scheduled redesign or the current wire contract.
+
+Under that alternative, VaydeNet would not require every transport to carry one
+identical packed C++ structure or one fixed frame size.
 
 The intended boundary is:
 
@@ -785,7 +817,7 @@ A VaydeNet message is expected to carry enough common information to identify th
 
 A protocol identifier recognizes VaydeNet traffic. A source-node identifier identifies the sender. Neither authenticates the sender.
 
-For nRF24L01, a complete logical message should fit into one 32-byte transport frame when possible. Fragmentation should be optional for larger messages rather than mandatory conversion of every message from the legacy 220-byte packet. The exact nRF24L01 frame layout is still design work.
+For nRF24L01, a complete logical message should fit into one 32-byte transport frame when possible. Fragmentation should be optional for larger messages rather than mandatory conversion of every message from the legacy 220-byte packet. A compact logical-message layout would require new design work; the current eight-fragment `Nrf24Frame` layout is already implemented.
 
 ## Missing Core Work
 
